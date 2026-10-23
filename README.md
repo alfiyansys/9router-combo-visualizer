@@ -6,6 +6,8 @@ A userscript that shows your 9router **combo chains** as a live overlay on the 9
 provider connections that drift in and out of rate limits. The dashboard lists the entries; this
 overlay shows how a request actually travels through them.
 
+![Tree view of a nested fallback combo: the highlighted path ends at the model that would serve a request now](docs/tree-view.jpeg)
+
 ## What it shows
 
 - **The chain of every combo:** fallback entries in try order, round-robin / random / smart /
