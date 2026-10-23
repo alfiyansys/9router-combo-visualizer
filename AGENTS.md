@@ -55,6 +55,7 @@ dist/9router-combo-visualizer.user.js   built file, committed (install + @update
 - **Granular commits:** one logical change per commit (e.g. a CSS fix, a new strategy, the
   version bump plus rebuild). Do not mix refactors with behaviour changes.
 - Imperative English subject ≤ 72 chars, a body when the reason is not obvious.
+- `Co-Authored-By` trailers are fine; never add session trailers (e.g. `Claude-Session:`).
 - Small changes go straight to `main`; use a branch + PR for larger reworks.
 - Commit or push only when the maintainer asks.
 
