@@ -73,8 +73,9 @@ There is no test suite; verify in a real dashboard:
 3. For the shell, open `http://127.0.0.1:8765/dist/9router-combo-visualizer.user.js` and let
    Tampermonkey install it (remove the GitHub-installed copy first to avoid running both).
 
-Check at least: a nested combo, a round-robin combo, an empty combo, a combo with an unknown
-prefix, connection details on click, light and dark mode, and the stream reconnect state.
+Check at least, in both the Cards and Tree views: a nested combo, a round-robin combo, an empty
+combo, a combo with an unknown prefix or a reference to a missing combo, connection details on
+click, collapsing a nested combo, light and dark mode, and the stream reconnect state.
 
 ## 9router API contract
 

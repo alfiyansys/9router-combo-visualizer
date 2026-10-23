@@ -10,6 +10,9 @@ overlay shows how a request actually travels through them.
 
 - **The chain of every combo:** fallback entries in try order, round-robin / random / smart /
   fusion entries as a parallel group, nested combos expanded inline (with cycle detection).
+- **Two views:** *Cards* (nested boxes, good for reading details) and *Tree* (a left-to-right
+  diagram of combo → entries → nested combos → models → connections, with fallback branches
+  numbered and the path to the serving entry highlighted).
 - **Provider health per model:** each entry is resolved to its provider (custom node prefix,
   built-in alias, or provider id) and coloured by its connections:
   🟢 all ready · 🟡 some rate-limited, backing off or model-locked · 🔴 down or disabled ·
@@ -42,8 +45,9 @@ Updates arrive automatically through the userscript manager.
 | Open / close the overlay | **⛓ Chains** button, `Alt+Shift+C`, or the userscript menu |
 | Close | `Esc` or **Close** |
 | Pick a combo | click it in the sidebar, or a "used by" link |
-| Collapse a nested combo | click its `▾ combo …` header |
-| See a model's connections | click the model row |
+| Switch between cards and tree | **Cards / Tree** toggle (remembered per browser) |
+| Collapse a nested combo | click its `▾ combo …` header or tree node |
+| See a model's connections | click the model row or tree node |
 | Hide the floating button | userscript menu → *Hide floating button* (the shortcut keeps working) |
 
 The data refreshes every 15 s; traffic updates live.
