@@ -1,0 +1,14 @@
+{
+  "name": "9router-combo-visualizer",
+  "version": "0.1.0",
+  "description": "Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "alfiyansys",
+  "repository": "github:alfiyansys/9router-combo-visualizer",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node --check src/core.js && node --check src/userscript.js && node build.mjs --check"
+  }
+}
