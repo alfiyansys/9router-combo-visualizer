@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         9router Combo Visualizer
 // @namespace    https://github.com/alfiyansys/9router-combo-visualizer
-// @version      0.1.0
+// @version      0.2.0
 // @description  Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.
 // @author       alfiyansys
 // @license      MIT
@@ -94,7 +94,26 @@
   .legend span{display:inline-flex;gap:6px;align-items:center}
   .feed{margin-top:18px;border-top:1px solid var(--line);padding-top:10px;font-size:12px;color:var(--mute)}
   .feed div{font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .empty{color:var(--mute);padding:30px 0}`;
+  .empty{color:var(--mute);padding:30px 0}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{border:0;border-radius:0;background:transparent;color:var(--mute)} .seg button.on{background:var(--chip);color:var(--ink);font-weight:600}
+  .tree{overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px}
+  .tree svg{display:block;font:12px ui-sans-serif,system-ui,sans-serif}
+  .tree .edge{fill:none;stroke:var(--line);stroke-width:1.5}
+  .tree .edge.hot{stroke:var(--acc);stroke-width:2.5}
+  .tree .elab{fill:var(--mute);font-size:10px;paint-order:stroke;stroke:var(--panel);stroke-width:3px}
+  .tree .box{fill:var(--bg);stroke:var(--line)}
+  .tree .n-combo .box{fill:var(--chip)}
+  .tree .n-conn .box{fill:var(--panel);stroke-dasharray:3 2}
+  .tree .serve .box{stroke:var(--acc);stroke-width:2}
+  .tree .dead{opacity:.55}
+  .tree .flash .box{animation:tfl 2.2s ease-out}
+  @keyframes tfl{0%{fill:color-mix(in srgb,var(--acc) 35%,var(--bg))}100%{fill:var(--bg)}}
+  .tree .t1{fill:var(--ink)} .tree .t1.mono{font-family:ui-monospace,monospace}
+  .tree .t2{fill:var(--mute);font-size:10.5px}
+  .tree .stripe.ok{fill:var(--ok)}.tree .stripe.warn{fill:var(--warn)}.tree .stripe.bad{fill:var(--bad)}.tree .stripe.none{fill:var(--none)}
+  .tree g[data-k],.tree g[data-l]{cursor:pointer}`;
+  const TREE = { W: 280, H: 36, COL: 330, ROW: 44, PAD: 6 };
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const now = () => Date.now();
@@ -103,6 +122,11 @@
     const s = (now() - new Date(t)) / 1000;
     if (isNaN(s)) return "";
     return s < 60 ? `${s | 0}s` : s < 3600 ? `${(s / 60) | 0}m` : s < 86400 ? `${(s / 3600) | 0}h` : `${(s / 86400) | 0}d`;
+  };
+  // per-viewer preference only; storage can be unavailable, so never depend on it
+  const pref = {
+    get: (k, d) => { try { return localStorage.getItem("nr-combo-viz:" + k) ?? d; } catch { return d; } },
+    set: (k, v) => { try { localStorage.setItem("nr-combo-viz:" + k, v); } catch {} },
   };
   const getJSON = async (u) => {
     const r = await fetch(u, { credentials: "same-origin" });
@@ -113,7 +137,8 @@
   function create() {
     let host = null, root = null, es = null, timers = [], onKey = null, pend = false;
     const S = { combos: [], conns: [], nodes: [], aliases: {}, settings: {}, live: null, liveOk: false,
-                sel: null, q: "", open: new Set(), shut: new Set(), flash: new Map(), lastSeen: null, loadedAt: null, err: null };
+                sel: null, q: "", open: new Set(), shut: new Set(), flash: new Map(), lastSeen: null, loadedAt: null, err: null,
+                view: pref.get("view", "cards") };
     const $ = (id) => root.getElementById(id);
 
     // ---- data ----
@@ -227,6 +252,11 @@
       requestAnimationFrame(() => { pend = false; if (root) draw(); });
     }
 
+    // nested combos start expanded down to depth 2; explicit clicks override in either direction
+    const isOpenCombo = (p) => S.open.has(p) || (!S.shut.has(p) && p.split("/").length - 1 < 3);
+    const aggHealth = (ls) => ls.some((l) => l.health === "ok") ? "ok" : ls.some(usable) ? "warn"
+      : ls.some((l) => l.health === "bad") ? "bad" : "none";
+
     function healthBar(ls) {
       const n = ls.length || 1, cnt = { ok: 0, warn: 0, bad: 0, none: 0 };
       ls.forEach((l) => cnt[l.health]++);
@@ -238,7 +268,7 @@
       const cls = ["leaf", tag ? "serve" : "", usable(r) ? "" : "dead",
         r.flash && now() - r.flash.t < 2500 ? "flash" : "", r.busy ? "busy" : ""].join(" ");
       const bad = r.states.filter(([s]) => s === "bad").length;
-      const connTxt = !r.prefix ? `<span class="bad-t">no provider prefix</span>`
+      const connTxt = !r.prefix ? `<span class="bad-t">missing combo or alias</span>`
         : !r.conns.length ? `<span class="bad-t">${r.prov.known ? "no connection" : "unknown prefix"}</span>`
         : `${r.ok}/${r.conns.length} ready${r.warn ? ` · <span class="warn-t">${r.warn} limited</span>` : ""}${bad ? ` · <span class="bad-t">${bad} down</span>` : ""}`;
       const conns = openConns && r.conns.length ? `<div class="conns">${r.conns.map((c, k) => {
@@ -251,7 +281,7 @@
         <div class="${cls}" data-l="${esc(path)}" title="${esc(r.entry)} — click to ${openConns ? "hide" : "show"} connections">
         <span class="dot ${r.health}"></span><span class="pfx">${esc(r.prefix || "—")}</span>
         <span class="md">${esc(r.model)}</span>${r.via ? `<span class="badge">alias ${esc(r.via)}</span>` : ""}
-        <span class="pv">${esc(r.prov.label)}</span>
+        <span class="pv">${r.prefix ? esc(r.prov.label) : ""}</span>
         <span class="st">${connTxt}<br>${r.req ? `${r.req.toLocaleString()} req` : "no traffic"}${r.last ? ` · ${ago(r.last)} ago` : ""}${tag ? ` · <span class="acc-t">${tag}</span>` : ""}</span>
         </div>${conns}</div></div>`;
     }
@@ -264,8 +294,7 @@
       const body = c.models.map((m, i) => {
         const r = resolveEntry(m), p = `${path}/${i}`;
         if (r.type === "leaf") return leafHTML(r, i, p, marks);
-        const depth = p.split("/").length - 1, isOpen = S.open.has(p) || (!S.shut.has(p) && depth < 3);
-        const sub = comboMap().get(r.name), ls = leaves(r.name);
+        const isOpen = isOpenCombo(p), sub = comboMap().get(r.name), ls = leaves(r.name);
         return `<div class="step"><span class="num">${i + 1}</span><div class="lw nest">
           <div class="gh"><span class="tw" data-k="${esc(p)}">${isOpen ? "▾" : "▸"} combo ${esc(r.name)}</span>
           <span class="badge">${esc(sub ? strategyOf(sub) : "?")}</span><span class="badge">${ls.length} models</span>
@@ -275,6 +304,77 @@
       return `<div class="grp ${st.ordered ? "" : "par"}"><div class="gh"><span class="tag">${esc(st.label)}</span>
         <span>${esc(st.hint)}</span><span>· ${c.models.length} entries</span></div>
         <div class="list">${body || `<div class="empty">empty combo</div>`}</div></div>`;
+    }
+
+    // ---- tree view: left-to-right SVG, combo -> entries -> nested combos -> models -> connections ----
+    function treeNodes(name, path, seen, marks) {
+      const c = comboMap().get(name);
+      const ls = leaves(name);
+      const node = { kind: "combo", path, key: path, children: [], health: aggHealth(ls),
+        t1: (path ? (isOpenCombo(path) ? "▾ " : "▸ ") : "") + "combo " + name,
+        t2: c ? `${strategyOf(c)} · ${c.models.length} entries · ${ls.length} models` : "not found" };
+      if (!c) return node;
+      if (seen.has(name)) return { ...node, t2: "cycle", health: "bad" };
+      if (path && !isOpenCombo(path)) return node;
+      const s2 = new Set(seen).add(name), ordered = strat(strategyOf(c)).ordered;
+      c.models.forEach((m, i) => {
+        const r = resolveEntry(m), p = `${path}/${i}`;
+        let ch;
+        if (r.type === "combo") ch = treeNodes(r.name, p, s2, marks);
+        else {
+          const tag = marks.get(p), bad = r.states.filter(([s]) => s === "bad").length;
+          ch = { kind: "leaf", path: p, entry: r.entry, health: r.health, tag, dead: !usable(r), children: [],
+            flash: r.flash && now() - r.flash.t < 2500,
+            t1: `${r.prefix ? r.prefix + "/" : ""}${r.model}`,
+            t2: [tag || "", r.prefix ? r.prov.label : "",
+              !r.prefix ? "missing combo or alias" : r.conns.length ? `${r.ok}/${r.conns.length} ready${bad ? `, ${bad} down` : ""}` : (r.prov.known ? "no connection" : "unknown prefix"),
+              r.req ? `${r.req.toLocaleString()} req` : ""].filter(Boolean).join(" · ") };
+          if (S.open.has("L" + p)) ch.children = r.conns.map((cn, k) => ({ kind: "conn", path: `${p}#${k}`, children: [],
+            health: r.states[k][0], t1: cn.name || cn.displayName || cn.id.slice(0, 8), t2: `p${cn.priority ?? "–"} · ${r.states[k][1]}` }));
+        }
+        ch.edge = ordered ? String(i + 1) : "";
+        node.children.push(ch);
+      });
+      return node;
+    }
+
+    function layout(root) {
+      let row = 0, maxDepth = 0;
+      (function place(n, d) {
+        n.x = d * TREE.COL; maxDepth = Math.max(maxDepth, d);
+        if (!n.children.length) { n.y = row++ * TREE.ROW; return; }
+        n.children.forEach((c) => place(c, d + 1));
+        n.y = (n.children[0].y + n.children[n.children.length - 1].y) / 2;
+      })(root, 0);
+      return { w: maxDepth * TREE.COL + TREE.W + TREE.PAD * 2, h: Math.max(row, 1) * TREE.ROW - (TREE.ROW - TREE.H) + TREE.PAD * 2 };
+    }
+
+    const fit = (s, px, cw) => { const n = Math.floor(px / cw); return s.length > n ? s.slice(0, Math.max(n - 1, 1)) + "…" : s; };
+
+    function treeHTML(name, marks) {
+      const root = treeNodes(name, "", new Set(), marks), { w, h } = layout(root);
+      const hot = new Set();
+      for (const p of marks.keys()) { let q = p; while (q) { hot.add(q); q = q.slice(0, q.lastIndexOf("/")); } }
+      const { W, H, PAD } = TREE, edges = [], boxes = [];
+      (function walk(n) {
+        const x = n.x + PAD, y = n.y + PAD;
+        for (const c of n.children) {
+          const x1 = x + W, y1 = y + H / 2, x2 = c.x + PAD, y2 = c.y + PAD + H / 2, mx = (x1 + x2) / 2;
+          edges.push(`<path class="edge ${hot.has(c.path) ? "hot" : ""}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"/>`);
+          if (c.edge) edges.push(`<text class="elab" x="${x2 - 12}" y="${y2 - 4}" text-anchor="end">${c.edge}</text>`);
+          walk(c);
+        }
+        const cls = [`n-${n.kind}`, n.tag ? "serve" : "", n.dead ? "dead" : "", n.flash ? "flash" : ""].join(" ");
+        const attr = n.kind === "combo" && n.path ? `data-k="${esc(n.path)}"` : n.kind === "leaf" ? `data-l="${esc(n.path)}"` : "";
+        const sub = n.t2;
+        boxes.push(`<g class="${cls}" ${attr}><title>${esc(n.entry || n.t1)}\n${esc(sub)}</title>
+          <rect class="box" x="${x}" y="${y}" width="${W}" height="${H}" rx="7"/>
+          <rect class="stripe ${n.health}" x="${x}" y="${y}" width="4" height="${H}" rx="2"/>
+          <text class="t1 ${n.kind === "leaf" ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(n.t1, W - 20, n.kind === "leaf" ? 7.2 : 6.6))}</text>
+          <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(sub, W - 20, 5.8))}</text></g>`);
+      })(root);
+      return `<div class="tree"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Chain tree of ${esc(name)}">
+        ${edges.join("")}${boxes.join("")}</svg></div>`;
     }
 
     function draw() {
@@ -309,8 +409,9 @@
         <span class="pill">${esc(strategyOf(c))}</span><span class="pill">${ls.length} resolved models</span>
         ${["ok", "warn", "bad", "none"].map((h) => `<span class="pill"><span class="dot ${h}"></span>${cnt(h)}</span>`).join("")}
         ${by.length ? `<span>used by ${by.map((b) => `<a href="#" data-c="${esc(b)}" style="color:var(--acc)">${esc(b)}</a>`).join(", ")}</span>` : ""}
-        <span>· call as <code>${esc(c.name)}</code></span></div>
-        ${comboHTML(c.name, "", new Set(), marks)}
+        <span>· call as <code>${esc(c.name)}</code></span><span class="sp"></span>
+        <span class="seg">${["cards", "tree"].map((v) => `<button data-v="${v}" class="${S.view === v ? "on" : ""}">${v === "cards" ? "Cards" : "Tree"}</button>`).join("")}</span></div>
+        ${S.view === "tree" ? treeHTML(c.name, marks) : comboHTML(c.name, "", new Set(), marks)}
         <div class="legend"><span><span class="dot ok"></span>all connections ready</span><span><span class="dot warn"></span>some limited / backoff / model lock</span>
         <span><span class="dot bad"></span>connections down</span><span><span class="dot none"></span>no connection or unknown prefix</span>
         <span>outline = would take a request now</span><span>flash = request just landed · click a model for its connections</span></div>
@@ -319,15 +420,16 @@
     }
 
     function onClick(e) {
-      const t = e.target.closest("[data-c],[data-k],[data-l],#x,#rf");
+      const t = e.target.closest("[data-c],[data-k],[data-l],[data-v],#x,#rf");
       if (!t) return;
       if (t.id === "x") return close();
       if (t.id === "rf") return load();
+      if (t.dataset.v) { S.view = t.dataset.v; pref.set("view", S.view); return render(); }
       if (t.dataset.c) { e.preventDefault(); S.sel = t.dataset.c; $("main").scrollTop = 0; return render(); }
       if (t.dataset.l != null) { const k = "L" + t.dataset.l; S.open.has(k) ? S.open.delete(k) : S.open.add(k); return render(); }
       if (t.dataset.k != null) {
-        const k = t.dataset.k, isOpen = t.textContent.trim().startsWith("▾");
-        S.open.delete(k); S.shut.delete(k); (isOpen ? S.shut : S.open).add(k); render();
+        const k = t.dataset.k, wasOpen = isOpenCombo(k);
+        S.open.delete(k); S.shut.delete(k); (wasOpen ? S.shut : S.open).add(k); render();
       }
     }
 
