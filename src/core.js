@@ -218,7 +218,7 @@
       const cls = ["leaf", tag ? "serve" : "", usable(r) ? "" : "dead",
         r.flash && now() - r.flash.t < 2500 ? "flash" : "", r.busy ? "busy" : ""].join(" ");
       const bad = r.states.filter(([s]) => s === "bad").length;
-      const connTxt = !r.prefix ? `<span class="bad-t">no provider prefix</span>`
+      const connTxt = !r.prefix ? `<span class="bad-t">missing combo or alias</span>`
         : !r.conns.length ? `<span class="bad-t">${r.prov.known ? "no connection" : "unknown prefix"}</span>`
         : `${r.ok}/${r.conns.length} ready${r.warn ? ` · <span class="warn-t">${r.warn} limited</span>` : ""}${bad ? ` · <span class="bad-t">${bad} down</span>` : ""}`;
       const conns = openConns && r.conns.length ? `<div class="conns">${r.conns.map((c, k) => {
@@ -231,7 +231,7 @@
         <div class="${cls}" data-l="${esc(path)}" title="${esc(r.entry)} — click to ${openConns ? "hide" : "show"} connections">
         <span class="dot ${r.health}"></span><span class="pfx">${esc(r.prefix || "—")}</span>
         <span class="md">${esc(r.model)}</span>${r.via ? `<span class="badge">alias ${esc(r.via)}</span>` : ""}
-        <span class="pv">${esc(r.prov.label)}</span>
+        <span class="pv">${r.prefix ? esc(r.prov.label) : ""}</span>
         <span class="st">${connTxt}<br>${r.req ? `${r.req.toLocaleString()} req` : "no traffic"}${r.last ? ` · ${ago(r.last)} ago` : ""}${tag ? ` · <span class="acc-t">${tag}</span>` : ""}</span>
         </div>${conns}</div></div>`;
     }
