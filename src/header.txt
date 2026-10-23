@@ -1,0 +1,19 @@
+// ==UserScript==
+// @name         9router Combo Visualizer
+// @namespace    https://github.com/alfiyansys/9router-combo-visualizer
+// @version      {{version}}
+// @description  Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.
+// @author       alfiyansys
+// @license      MIT
+// @homepageURL  https://github.com/alfiyansys/9router-combo-visualizer
+// @supportURL   https://github.com/alfiyansys/9router-combo-visualizer/issues
+// @updateURL    https://raw.githubusercontent.com/alfiyansys/9router-combo-visualizer/main/dist/9router-combo-visualizer.user.js
+// @downloadURL  https://raw.githubusercontent.com/alfiyansys/9router-combo-visualizer/main/dist/9router-combo-visualizer.user.js
+// @match        *://*/*
+// @noframes
+// @run-at       document-idle
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
+// ==/UserScript==
