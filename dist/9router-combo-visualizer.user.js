@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         9router Combo Visualizer
 // @namespace    https://github.com/alfiyansys/9router-combo-visualizer
-// @version      0.5.0
+// @version      0.5.1
 // @description  Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.
 // @author       alfiyansys
 // @license      MIT
@@ -49,6 +49,7 @@
   .pill{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:99px;background:var(--chip);color:var(--mute);font-size:12px;white-space:nowrap}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--none);flex:none}
   .ok{background:var(--ok)}.warn{background:var(--warn)}.bad{background:var(--bad)}.none{background:var(--none)}
+  .eb{font-size:11px;padding:1px 8px;color:var(--acc);vertical-align:middle}
   button{font:inherit;color:inherit;background:var(--chip);border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer}
   aside{border-right:1px solid var(--line);overflow:auto;background:var(--panel)}
   aside input{box-sizing:border-box;width:calc(100% - 20px);margin:10px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
@@ -134,6 +135,33 @@
     get: (k, d) => { try { return localStorage.getItem("nr-combo-viz:" + k) ?? d; } catch { return d; } },
     set: (k, v) => { try { localStorage.setItem("nr-combo-viz:" + k, v); } catch {} },
   };
+  // Edit hands off to the dashboard's own edit dialog; the overlay itself never writes. 9router has no
+  // URL for that dialog, so remember the combo, go to the combos page if needed, then press the Edit
+  // button on that combo's card once the list has rendered.
+  const EDIT_KEY = "nr-combo-viz:edit", COMBOS_PAGE = "/dashboard/combos";
+  function pressEdit(name) {
+    const t0 = now();
+    const tick = () => {
+      const box = [...document.querySelectorAll("input[type=checkbox][aria-label]")].find((i) => i.getAttribute("aria-label") === "Select " + name);
+      let card = box;
+      while (card && !card.querySelector?.('button[title="Edit"]')) card = card.parentElement;
+      const btns = card ? card.querySelectorAll('button[title="Edit"]') : [];
+      if (btns.length === 1) return btns[0].click(); // more than one means we climbed past the card
+      if (now() - t0 < 15000) setTimeout(tick, 250);
+    };
+    tick();
+  }
+  function editCombo(name) {
+    if (location.pathname === COMBOS_PAGE) return pressEdit(name);
+    try { sessionStorage.setItem(EDIT_KEY, name); } catch {}
+    location.assign(COMBOS_PAGE);
+  }
+  function resumeEdit() {
+    let name = null;
+    try { name = sessionStorage.getItem(EDIT_KEY); sessionStorage.removeItem(EDIT_KEY); } catch {}
+    if (name && location.pathname === COMBOS_PAGE) pressEdit(name);
+  }
+
   const getJSON = async (u) => {
     const r = await fetch(u, { credentials: "same-origin" });
     if (!r.ok) throw new Error(`${u} → ${r.status}`);
@@ -311,7 +339,8 @@
         return `<div class="step"><span class="num">${i + 1}</span><div class="lw nest">
           <div class="gh"><span class="tw" data-k="${esc(p)}">${isOpen ? "▾" : "▸"} combo ${esc(r.name)}</span>
           <span class="badge">${esc(sub ? strategyOf(sub) : "?")}</span><span class="badge">${ls.length} models</span>
-          ${r.via ? `<span class="badge">alias ${esc(r.via)}</span>` : ""}</div>
+          ${r.via ? `<span class="badge">alias ${esc(r.via)}</span>` : ""}
+          ${sub ? `<button class="eb" data-e="${esc(r.name)}" title="Open ${esc(r.name)} in the dashboard's edit dialog">Edit combo</button>` : ""}</div>
           ${isOpen ? comboHTML(r.name, p, s2, marks) : healthBar(ls)}</div></div>`;
       }).join("");
       return `<div class="grp ${st.ordered ? "" : "par"}"><div class="gh"><span class="tag">${esc(st.label)}</span>
@@ -557,7 +586,7 @@
       const cnt = (h) => ls.filter((l) => l.health === h).length;
       const feed = (L?.recentRequests || []).slice(0, 8).map((r) =>
         `<div>${esc(new Date(r.timestamp).toLocaleTimeString())} · ${esc(r.provider)} · ${esc(r.model)} · ${esc(r.status)} · ${esc(r.promptTokens)}/${esc(r.completionTokens)} tok</div>`).join("");
-      m.innerHTML = `<h2>${esc(c.name)}</h2><div class="sub">
+      m.innerHTML = `<h2>${esc(c.name)} <button class="eb" data-e="${esc(c.name)}" title="Open ${esc(c.name)} in the dashboard's edit dialog">Edit combo</button></h2><div class="sub">
         <span class="pill">${esc(strategyOf(c))}</span><span class="pill">${ls.length} resolved models</span>
         ${["ok", "warn", "bad", "none"].map((h) => `<span class="pill"><span class="dot ${h}"></span>${cnt(h)}</span>`).join("")}
         ${by.length ? `<span>used by ${by.map((b) => `<a href="#" data-c="${esc(b)}" style="color:var(--acc)">${esc(b)}</a>`).join(", ")}</span>` : ""}
@@ -604,10 +633,11 @@
 
     function onClick(e) {
       if (dragged) { dragged = false; return; }
-      const t = e.target.closest("[data-c],[data-k],[data-f],[data-l],[data-v],[data-s],#x,#rf");
+      const t = e.target.closest("[data-e],[data-c],[data-k],[data-f],[data-l],[data-v],[data-s],#x,#rf");
       if (!t) { if (S.focus != null && e.target.closest(".tree")) { S.focus = null; render(); } return; }
       if (t.dataset.f != null) { S.focus = S.focus === t.dataset.f ? null : t.dataset.f; return render(); }
       if (t.id === "x") return close();
+      if (t.dataset.e) { const name = t.dataset.e; close(); return editCombo(name); }
       if (t.id === "rf") return load();
       if (t.dataset.v) { S.view = t.dataset.v; pref.set("view", S.view); return render(); }
       if (t.dataset.s) { S.sort = t.dataset.s; pref.set("sort", S.sort); return render(); }
@@ -655,6 +685,7 @@
   }
 
   globalThis.NineRouterComboViz = { create };
+  resumeEdit();
 })();
 
 // Userscript shell: decides whether this page is a 9router dashboard, then offers the overlay
