@@ -92,7 +92,9 @@
   .tree .t1{fill:var(--ink)} .tree .t1.mono{font-family:ui-monospace,monospace}
   .tree .t2{fill:var(--mute);font-size:10.5px}
   .tree .stripe.ok{fill:var(--ok)}.tree .stripe.warn{fill:var(--warn)}.tree .stripe.bad{fill:var(--bad)}.tree .stripe.none{fill:var(--none)}
-  .tree g[data-k],.tree g[data-l]{cursor:pointer}`;
+  .tree g[data-k],.tree g[data-l]{cursor:pointer}
+  .tree .gbg{fill:var(--chip);opacity:.45} .tree .gh1{fill:var(--ink);font-weight:600;font-size:11px} .tree .gh2{fill:var(--mute);font-size:10.5px}
+  .tree .elab.hot{fill:var(--acc);font-weight:600}`;
   const TREE = { W: 280, H: 36, COL: 330, ROW: 44, PAD: 6 };
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -364,6 +366,128 @@
         ${edges.join("")}${boxes.join("")}</svg></div>`;
     }
 
+    // ---- flow view: combos left-to-right like the tree, but each model+provider is a single node in the
+    // last column, grouped by provider, so edges from every combo that reaches it converge on it ----
+    function flowHTML(name, marks) {
+      const { W, H, COL, ROW, PAD } = TREE, GH = 22, GAP = 14;
+      const combos = [], models = new Map(), edges = [], hot = new Set();
+      for (const p of marks.keys()) { let q = p; while (q) { hot.add(q); q = q.slice(0, q.lastIndexOf("/")); } }
+      let row = 0, maxDepth = 0;
+      // pass 1: walk like the tree; every leaf occurrence gets a provisional row, used as a barycenter
+      (function walk(cname, path, depth, seen) {
+        const c = comboMap().get(cname), ls = leaves(cname), first = row;
+        const node = { kind: "combo", path, depth, kids: [], health: aggHealth(ls),
+          t1: (path ? (isOpenCombo(path) ? "▾ " : "▸ ") : "") + "combo " + cname,
+          t2: c ? `${strategyOf(c)} · ${c.models.length} entries · ${ls.length} models` : "not found" };
+        combos.push(node); maxDepth = Math.max(maxDepth, depth);
+        if (c && seen.has(cname)) Object.assign(node, { t2: "cycle", health: "bad" });
+        if (c && !seen.has(cname) && (!path || isOpenCombo(path))) {
+          const s2 = new Set(seen).add(cname), ordered = strat(strategyOf(c)).ordered;
+          c.models.forEach((m, i) => {
+            const r = resolveEntry(m), p = `${path}/${i}`, label = ordered ? String(i + 1) : "";
+            let to;
+            if (r.type === "combo") {
+              to = walk(r.name, p, depth + 1, s2);
+              edges.push({ from: node, to, label, hot: hot.has(p), title: `${cname} #${i + 1} → combo ${r.name}` });
+            } else {
+              to = models.get(r.key);
+              if (!to) models.set(r.key, to = { kind: "leaf", r, rows: [], parents: [], entries: new Set(), tags: new Set(),
+                group: r.prefix ? r.prov.label : "unresolved" });
+              to.rows.push(row++); to.parents.push(node); to.entries.add(r.entry);
+              if (marks.has(p)) to.tags.add(marks.get(p));
+              edges.push({ from: node, to, label, hot: marks.has(p), title: `${cname} #${i + 1} → ${r.entry}` });
+            }
+            node.kids.push(to);
+          });
+        }
+        node.y0 = (row > first ? (first + row - 1) / 2 : row++) * ROW;
+        return node;
+      })(name, "", 0, new Set());
+
+      // pass 2: stack models by provider group, then centre combos on their children; repeat once with
+      // barycenters taken from the placed parents to cut crossings further
+      const mx = (maxDepth + 1) * COL, mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+      const ms = [...models.values()];
+      ms.forEach((m) => { m.b = mean(m.rows) * ROW; m.open = S.open.has("LF" + m.r.key) && m.r.conns.length > 0; });
+      let groups = [];
+      for (let pass = 0; pass < 2; pass++) {
+        if (pass) ms.forEach((m) => { m.b = mean(m.parents.map((p) => p.y)); });
+        const gm = new Map();
+        ms.forEach((m) => { if (!gm.has(m.group)) gm.set(m.group, []); gm.get(m.group).push(m); });
+        groups = [...gm].map(([g, list]) => ({ g, list: list.sort((a, b) => a.b - b.b), b: mean(list.map((m) => m.b)) })).sort((a, b) => a.b - b.b);
+        let y = 0;
+        for (const grp of groups) {
+          grp.y = y; y += GH;
+          for (const m of grp.list) {
+            const n = m.open ? m.r.conns.length : 1;
+            m.y = y + (n - 1) * ROW / 2; m.cy = y; y += n * ROW;
+          }
+          grp.h = y - grp.y - (ROW - H); y += GAP;
+        }
+        for (let d = maxDepth; d >= 0; d--) {
+          const col = combos.filter((c) => c.depth === d);
+          col.forEach((c) => { c.y = c.kids.length ? mean(c.kids.map((k) => k.y)) : c.y0; });
+          col.sort((a, b) => a.y - b.y || a.y0 - b.y0);
+          for (let i = 1; i < col.length; i++) col[i].y = Math.max(col[i].y, col[i - 1].y + ROW);
+        }
+      }
+
+      const nodes = [...combos, ...ms];
+      combos.forEach((c) => { c.x = c.depth * COL; });
+      ms.forEach((m) => { m.x = mx; });
+      const anyOpen = ms.some((m) => m.open);
+      const w = mx + (anyOpen ? COL : 0) + W + PAD * 2;
+      const h = Math.max(...nodes.map((n) => n.y + H), ...groups.map((g) => g.y + g.h)) + PAD * 2;
+
+      // converging edges arrive fanned out along the target's left side, ordered by source height
+      const inc = new Map();
+      edges.forEach((e) => { if (!inc.has(e.to)) inc.set(e.to, []); inc.get(e.to).push(e); });
+      for (const list of inc.values()) {
+        list.sort((a, b) => a.from.y - b.from.y);
+        const n = list.length, step = n > 1 ? Math.min(11, (H - 8) / (n - 1)) : 0;
+        list.forEach((e, k) => { e.ye = e.to.y + PAD + H / 2 + (k - (n - 1) / 2) * step; });
+      }
+      const svg = [];
+      groups.forEach((g) => {
+        const r0 = g.list[0].r, st = r0.conns.map((c) => connState(c, ""));
+        const ok = st.filter(([s]) => s === "ok").length;
+        svg.push(`<rect class="gbg" x="${mx + PAD - 6}" y="${g.y + PAD}" width="${W + 12}" height="${g.h}" rx="9"/>
+          <text class="gh1" x="${mx + PAD + 4}" y="${g.y + PAD + 15}">${esc(fit(g.g, W / 2, 6.6))}</text>
+          <text class="gh2" x="${mx + PAD + W}" y="${g.y + PAD + 15}" text-anchor="end">${g.list.length} model${g.list.length > 1 ? "s" : ""}${r0.prefix && r0.conns.length ? ` · ${ok}/${r0.conns.length} connections ready` : ""}</text>`);
+      });
+      for (const e of [...edges.filter((e) => !e.hot), ...edges.filter((e) => e.hot)]) {
+        const x1 = e.from.x + PAD + W, y1 = e.from.y + PAD + H / 2, x2 = e.to.x + PAD, d = Math.min((x2 - x1) / 2, COL * 0.6);
+        svg.push(`<path class="edge ${e.hot ? "hot" : ""}" d="M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${e.ye} ${x2},${e.ye}"><title>${esc(e.title)}</title></path>`);
+      }
+      for (const e of edges) if (e.label) svg.push(`<text class="elab ${e.hot ? "hot" : ""}" x="${e.to.x + PAD - 4}" y="${e.ye - 3}" text-anchor="end">${e.label}</text>`);
+      const box = (n, cls, attr, t1, t2, title, mono) => {
+        const x = n.x + PAD, y = n.y + PAD;
+        return `<g class="${cls}" ${attr}><title>${esc(title)}\n${esc(t2)}</title>
+          <rect class="box" x="${x}" y="${y}" width="${W}" height="${H}" rx="7"/>
+          <rect class="stripe ${n.health}" x="${x}" y="${y}" width="4" height="${H}" rx="2"/>
+          <text class="t1 ${mono ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(t1, W - 20, mono ? 7.2 : 6.6))}</text>
+          <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(t2, W - 20, 5.8))}</text></g>`;
+      };
+      combos.forEach((c) => svg.push(box(c, "n-combo", c.path ? `data-k="${esc(c.path)}"` : "", c.t1, c.t2, c.t1)));
+      ms.forEach((m) => {
+        const r = m.r, bad = r.states.filter(([s]) => s === "bad").length, refs = m.rows.length;
+        m.health = r.health;
+        const t2 = [[...m.tags].join(", "),
+          !r.prefix ? "missing combo or alias" : r.conns.length ? `${r.ok}/${r.conns.length} ready${bad ? `, ${bad} down` : ""}` : (r.prov.known ? "no connection" : "unknown prefix"),
+          refs > 1 ? `${refs} routes` : "", r.req ? `${r.req.toLocaleString()} req` : ""].filter(Boolean).join(" · ");
+        const cls = ["n-leaf", m.tags.size ? "serve" : "", usable(r) ? "" : "dead", r.flash && now() - r.flash.t < 2500 ? "flash" : ""].join(" ");
+        svg.push(box(m, cls, `data-l="${esc("F" + r.key)}"`, `${r.prefix ? r.prefix + "/" : ""}${r.model}`, t2, [...m.entries].join("\n"), true));
+        if (m.open) r.conns.forEach((cn, k) => {
+          const c = { x: mx + COL, y: m.cy + k * ROW, health: r.states[k][0] }, y1 = m.y + PAD + H / 2, y2 = c.y + PAD + H / 2;
+          const x1 = mx + PAD + W, x2 = c.x + PAD, xm = (x1 + x2) / 2;
+          svg.unshift(`<path class="edge" d="M${x1},${y1} C${xm},${y1} ${xm},${y2} ${x2},${y2}"/>`);
+          svg.push(box(c, "n-conn", "", cn.name || cn.displayName || cn.id.slice(0, 8), `p${cn.priority ?? "–"} · ${r.states[k][1]}`, cn.name || ""));
+        });
+      });
+      return `<div class="tree"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Flow of ${esc(name)}">
+        ${svg.join("")}</svg></div>`;
+    }
+
     function draw() {
       const live = $("live");
       live.querySelector(".dot").className = "dot " + (S.liveOk ? "ok" : "bad");
@@ -398,8 +522,8 @@
         ${["ok", "warn", "bad", "none"].map((h) => `<span class="pill"><span class="dot ${h}"></span>${cnt(h)}</span>`).join("")}
         ${by.length ? `<span>used by ${by.map((b) => `<a href="#" data-c="${esc(b)}" style="color:var(--acc)">${esc(b)}</a>`).join(", ")}</span>` : ""}
         <span>· call as <code>${esc(c.name)}</code></span><span class="sp"></span>
-        <span class="seg">${["cards", "tree"].map((v) => `<button data-v="${v}" class="${S.view === v ? "on" : ""}">${v === "cards" ? "Cards" : "Tree"}</button>`).join("")}</span></div>
-        ${S.view === "tree" ? treeHTML(c.name, marks) : comboHTML(c.name, "", new Set(), marks)}
+        <span class="seg">${["cards", "tree", "flow"].map((v) => `<button data-v="${v}" class="${S.view === v ? "on" : ""}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}</span></div>
+        ${S.view === "tree" ? treeHTML(c.name, marks) : S.view === "flow" ? flowHTML(c.name, marks) : comboHTML(c.name, "", new Set(), marks)}
         <div class="legend"><span><span class="dot ok"></span>all connections ready</span><span><span class="dot warn"></span>some limited / backoff / model lock</span>
         <span><span class="dot bad"></span>connections down</span><span><span class="dot none"></span>no connection or unknown prefix</span>
         <span>outline = would take a request now</span><span>flash = request just landed · click a model for its connections</span></div>
