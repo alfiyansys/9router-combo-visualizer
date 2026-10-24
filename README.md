@@ -1,6 +1,7 @@
 # 9router Combo Visualizer
 
-A userscript that shows your 9router **combo chains** as a live overlay on the 9router dashboard.
+A userscript that shows your [9router](https://github.com/decolua/9router) **combo chains** as a
+live overlay on the 9router dashboard.
 
 9router combos can nest other combos, mix fallback with round-robin, and point at dozens of
 provider connections that drift in and out of rate limits. The dashboard lists the entries; this
@@ -100,6 +101,15 @@ npm run check   # syntax check + fail if dist/ is stale
 
 See [AGENTS.md](AGENTS.md) for the layout, conventions, testing against a live dashboard and the
 release steps.
+
+## Upstream
+
+This is an independent, unofficial add-on for [9router](https://github.com/decolua/9router) by
+decolua. All credit for the router itself goes there.
+
+To the 9router maintainers: if a chain view like this belongs in the dashboard, feel free to take
+it. The code is MIT and dependency-free, and the chain resolution in [`src/core.js`](src/core.js)
+does not depend on the userscript shell.
 
 ## License
 
