@@ -1,6 +1,6 @@
 {
   "name": "9router-combo-visualizer",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.",
   "private": true,
   "type": "module",
