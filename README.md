@@ -54,6 +54,7 @@ Updates arrive automatically through the userscript manager.
 | Sort the combo list | **Sort: Dashboard / Name A–Z** above the list (remembered per browser) |
 | Switch between cards and tree | **Cards / Tree** toggle (remembered per browser) |
 | Collapse a nested combo | click its `▾ combo …` header or tree node |
+| Move around a large Tree / Flow | drag the diagram with the mouse (a drag never counts as a click) |
 | See a model's connections | click the model row or tree node |
 | Hide the floating button | userscript menu → *Hide floating button* (the shortcut keeps working) |
 

@@ -75,7 +75,8 @@ There is no test suite; verify in a real dashboard:
 
 Check at least, in the Cards, Tree and Flow views: a nested combo, a round-robin combo, an empty
 combo, a combo with an unknown prefix or a reference to a missing combo, connection details on
-click, collapsing a nested combo (Tree/Cards) or highlighting its routes (Flow), light and dark mode, and the stream reconnect state.
+click, collapsing a nested combo (Tree/Cards) or highlighting its routes (Flow), dragging to pan a Tree/Flow wider and taller than the window
+(a drag must not toggle the node it started on), light and dark mode, and the stream reconnect state.
 
 ## 9router API contract
 
