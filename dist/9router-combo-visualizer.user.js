@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         9router Combo Visualizer
 // @namespace    https://github.com/alfiyansys/9router-combo-visualizer
-// @version      0.5.2
+// @version      0.5.3
 // @description  Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.
 // @author       alfiyansys
 // @license      MIT
@@ -174,7 +174,7 @@
     let host = null, root = null, es = null, timers = [], onKey = null, pend = false, drawn = "", pan = null, dragged = false;
     const S = { combos: [], conns: [], nodes: [], aliases: {}, settings: {}, live: null, liveOk: false,
                 sel: null, focus: null, q: "", open: new Set(), shut: new Set(), flash: new Map(), lastSeen: null, loadedAt: null, err: null,
-                view: pref.get("view", "cards"), sort: pref.get("sort", "dashboard") };
+                view: pref.get("view", "cards"), sort: pref.get("sort", "dashboard"), edit: false };
     const $ = (id) => root.getElementById(id);
 
     // ---- data ----
@@ -342,7 +342,7 @@
           <div class="gh"><span class="tw" data-k="${esc(p)}">${isOpen ? "▾" : "▸"} combo ${esc(r.name)}</span>
           <span class="badge">${esc(sub ? strategyOf(sub) : "?")}</span><span class="badge">${ls.length} models</span>
           ${r.via ? `<span class="badge">alias ${esc(r.via)}</span>` : ""}
-          ${sub ? `<button class="eb" data-e="${esc(r.name)}" title="Open ${esc(r.name)} in the dashboard's edit dialog">Edit combo</button>` : ""}</div>
+          ${sub && S.edit ? `<button class="eb" data-e="${esc(r.name)}" title="Open ${esc(r.name)} in the dashboard's edit dialog">Edit combo</button>` : ""}</div>
           ${isOpen ? comboHTML(r.name, p, s2, marks) : healthBar(ls)}</div></div>`;
       }).join("");
       return `<div class="grp ${st.ordered ? "" : "par"}"><div class="gh"><span class="tag">${esc(st.label)}</span>
@@ -420,7 +420,7 @@
         boxes.push(`<g class="${cls}" ${attr}><title>${esc(n.entry || n.t1)}\n${esc(sub)}</title>
           <rect class="box" x="${x}" y="${y}" width="${W}" height="${H}" rx="7"/>
           <rect class="stripe ${n.health}" x="${x}" y="${y}" width="4" height="${H}" rx="2"/>
-          <text class="t1 ${n.kind === "leaf" ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(n.t1, W - (n.name ? 44 : 20), n.kind === "leaf" ? 7.2 : 6.6))}</text>${n.name ? editGlyph(n.name, x, y) : ""}
+          <text class="t1 ${n.kind === "leaf" ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(n.t1, W - (n.name && S.edit ? 44 : 20), n.kind === "leaf" ? 7.2 : 6.6))}</text>${n.name && S.edit ? editGlyph(n.name, x, y) : ""}
           <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(sub, W - 20, 5.8))}</text></g>`);
       })(root);
       return `<div class="tree"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Chain tree of ${esc(name)}">
@@ -535,8 +535,8 @@
         return `<g class="${cls}" ${attr}><title>${esc(title)}\n${esc(t2)}</title>
           <rect class="box" x="${x}" y="${y}" width="${W}" height="${H}" rx="7"/>
           <rect class="stripe ${n.health}" x="${x}" y="${y}" width="4" height="${H}" rx="2"/>
-          <text class="t1 ${mono ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(t1, W - (n.name ? 44 : 20), mono ? 7.2 : 6.6))}</text>
-          <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(t2, W - 20, 5.8))}</text>${n.name ? editGlyph(n.name, x, y) : ""}</g>`;
+          <text class="t1 ${mono ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(t1, W - (n.name && S.edit ? 44 : 20), mono ? 7.2 : 6.6))}</text>
+          <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(t2, W - 20, 5.8))}</text>${n.name && S.edit ? editGlyph(n.name, x, y) : ""}</g>`;
       };
       combos.forEach((c) => svg.push(box(c, `n-combo ${c.fade ? "fade" : ""} ${c.foc ? "foc" : ""}`, c.path ? `data-f="${esc(c.path)}"` : "",
         c.t1, c.t2, `${c.t1} — click to ${c.foc ? "clear the highlight" : "highlight its routes"}`)));
@@ -572,6 +572,7 @@
       // numeric collation so "combo-2" sorts before "combo-10"; "dashboard" keeps 9router's own order
       if (S.sort === "name") list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
       root.querySelectorAll("[data-s]").forEach((b) => b.classList.toggle("on", b.dataset.s === S.sort));
+      root.querySelectorAll("[data-m]").forEach((b) => b.classList.toggle("on", (b.dataset.m === "edit") === S.edit));
       $("side").innerHTML = list.map((c) => {
         const ls = leaves(c.name), nested = c.models.some((m) => cm.has(m)), by = usedBy(c.name);
         const hot = ls.some((l) => l.busy || (l.flash && now() - l.flash.t < 60000));
@@ -594,7 +595,7 @@
       const cnt = (h) => ls.filter((l) => l.health === h).length;
       const feed = (L?.recentRequests || []).slice(0, 8).map((r) =>
         `<div>${esc(new Date(r.timestamp).toLocaleTimeString())} · ${esc(r.provider)} · ${esc(r.model)} · ${esc(r.status)} · ${esc(r.promptTokens)}/${esc(r.completionTokens)} tok</div>`).join("");
-      m.innerHTML = `<h2>${esc(c.name)} <button class="eb" data-e="${esc(c.name)}" title="Open ${esc(c.name)} in the dashboard's edit dialog">Edit combo</button></h2><div class="sub">
+      m.innerHTML = `<h2>${esc(c.name)}${S.edit ? ` <button class="eb" data-e="${esc(c.name)}" title="Open ${esc(c.name)} in the dashboard's edit dialog">Edit combo</button>` : ""}</h2><div class="sub">
         <span class="pill">${esc(strategyOf(c))}</span><span class="pill">${ls.length} resolved models</span>
         ${["ok", "warn", "bad", "none"].map((h) => `<span class="pill"><span class="dot ${h}"></span>${cnt(h)}</span>`).join("")}
         ${by.length ? `<span>used by ${by.map((b) => `<a href="#" data-c="${esc(b)}" style="color:var(--acc)">${esc(b)}</a>`).join(", ")}</span>` : ""}
@@ -641,7 +642,7 @@
 
     function onClick(e) {
       if (dragged) { dragged = false; return; }
-      const t = e.target.closest("[data-e],[data-c],[data-k],[data-f],[data-l],[data-v],[data-s],#x,#rf");
+      const t = e.target.closest("[data-e],[data-c],[data-k],[data-f],[data-l],[data-v],[data-s],[data-m],#x,#rf");
       if (!t) { if (S.focus != null && e.target.closest(".tree")) { S.focus = null; render(); } return; }
       if (t.dataset.f != null) { S.focus = S.focus === t.dataset.f ? null : t.dataset.f; return render(); }
       if (t.id === "x") return close();
@@ -649,6 +650,7 @@
       if (t.id === "rf") return load();
       if (t.dataset.v) { S.view = t.dataset.v; pref.set("view", S.view); return render(); }
       if (t.dataset.s) { S.sort = t.dataset.s; pref.set("sort", S.sort); return render(); }
+      if (t.dataset.m) { S.edit = t.dataset.m === "edit"; return render(); }
       if (t.dataset.c) { e.preventDefault(); S.sel = t.dataset.c; S.focus = null; $("main").scrollTop = 0; return render(); }
       if (t.dataset.l != null) { const k = "L" + t.dataset.l; S.open.has(k) ? S.open.delete(k) : S.open.add(k); return render(); }
       if (t.dataset.k != null) {
@@ -659,6 +661,7 @@
 
     function open() {
       if (host) return;
+      S.edit = false; // every open starts read-only; edit mode is never remembered
       document.getElementById(ID)?.remove();
       host = document.createElement("div");
       host.id = ID;
@@ -667,6 +670,8 @@
       root = host.attachShadow({ mode: "open" });
       root.innerHTML = `<style>${CSS}</style><div class="w"><header><b>Combo chains</b>
         <span class="pill" id="live"><span class="dot"></span>stream</span><span class="pill" id="info"></span><span class="sp"></span>
+        <span class="seg" title="Edit mode shows Edit combo buttons; editing itself happens in the dashboard's dialog">
+        <button data-m="view">Read-only</button><button data-m="edit">Edit</button></span>
         <button id="rf">Refresh</button><button id="x">Close (Esc)</button></header>
         <aside><input id="q" placeholder="Filter combo / model…">
         <div class="srt">Sort<span class="seg"><button data-s="dashboard">Dashboard</button><button data-s="name">Name A–Z</button></span></div>
