@@ -94,7 +94,9 @@
   .tree .stripe.ok{fill:var(--ok)}.tree .stripe.warn{fill:var(--warn)}.tree .stripe.bad{fill:var(--bad)}.tree .stripe.none{fill:var(--none)}
   .tree g[data-k],.tree g[data-l]{cursor:pointer}
   .tree .gbg{fill:var(--chip);opacity:.45} .tree .gh1{fill:var(--ink);font-weight:600;font-size:11px} .tree .gh2{fill:var(--mute);font-size:10.5px}
-  .tree .elab.hot{fill:var(--acc);font-weight:600}`;
+  .tree .elab.hot{fill:var(--acc);font-weight:600}
+  .tree .fade{opacity:.18} .tree .edge.foc{stroke:var(--alt);stroke-width:2.5} .tree .elab.foc{fill:var(--alt);font-weight:600}
+  .tree .n-combo.foc .box{stroke:var(--alt);stroke-width:2} .tree g[data-f]{cursor:pointer}`;
   const TREE = { W: 280, H: 36, COL: 330, ROW: 44, PAD: 6 };
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -119,7 +121,7 @@
   function create() {
     let host = null, root = null, es = null, timers = [], onKey = null, pend = false, drawn = "";
     const S = { combos: [], conns: [], nodes: [], aliases: {}, settings: {}, live: null, liveOk: false,
-                sel: null, q: "", open: new Set(), shut: new Set(), flash: new Map(), lastSeen: null, loadedAt: null, err: null,
+                sel: null, focus: null, q: "", open: new Set(), shut: new Set(), flash: new Map(), lastSeen: null, loadedAt: null, err: null,
                 view: pref.get("view", "cards") };
     const $ = (id) => root.getElementById(id);
 
@@ -377,11 +379,12 @@
       (function walk(cname, path, depth, seen) {
         const c = comboMap().get(cname), ls = leaves(cname), first = row;
         const node = { kind: "combo", path, depth, kids: [], health: aggHealth(ls),
-          t1: (path ? (isOpenCombo(path) ? "▾ " : "▸ ") : "") + "combo " + cname,
+          t1: "combo " + cname,
           t2: c ? `${strategyOf(c)} · ${c.models.length} entries · ${ls.length} models` : "not found" };
         combos.push(node); maxDepth = Math.max(maxDepth, depth);
         if (c && seen.has(cname)) Object.assign(node, { t2: "cycle", health: "bad" });
-        if (c && !seen.has(cname) && (!path || isOpenCombo(path))) {
+        // always fully expanded: collapsing would drop shared models and reshuffle the whole column
+        if (c && !seen.has(cname)) {
           const s2 = new Set(seen).add(cname), ordered = strat(strategyOf(c)).ordered;
           c.models.forEach((m, i) => {
             const r = resolveEntry(m), p = `${path}/${i}`, label = ordered ? String(i + 1) : "";
@@ -447,19 +450,27 @@
         const n = list.length, step = n > 1 ? Math.min(11, (H - 8) / (n - 1)) : 0;
         list.forEach((e, k) => { e.ye = e.to.y + PAD + H / 2 + (k - (n - 1) / 2) * step; });
       }
+      // clicking a combo highlights everything it can reach (and the chain leading to it) without moving anything
+      const f = S.focus, inF = (p) => f == null || p === f || p.startsWith(f + "/") || f.startsWith(p + "/") || p === "";
+      const below = (p) => f == null || p === f || p.startsWith(f + "/");
+      edges.forEach((e) => { e.foc = f != null && below(e.from.path) || (f != null && e.to.kind === "combo" && (f === e.to.path || f.startsWith(e.to.path + "/"))); });
+      combos.forEach((c) => { c.fade = !inF(c.path); c.foc = f != null && c.path === f; });
+      ms.forEach((m) => { m.fade = f != null && !edges.some((e) => e.to === m && e.foc); });
+      edges.forEach((e) => { e.fade = f != null && !e.foc; });
       const svg = [];
       groups.forEach((g) => {
         const r0 = g.list[0].r, st = r0.conns.map((c) => connState(c, ""));
         const ok = st.filter(([s]) => s === "ok").length;
-        svg.push(`<rect class="gbg" x="${mx + PAD - 6}" y="${g.y + PAD}" width="${W + 12}" height="${g.h}" rx="9"/>
+        const gf = g.list.every((m) => m.fade) ? "fade" : "";
+        svg.push(`<g class="${gf}"><rect class="gbg" x="${mx + PAD - 6}" y="${g.y + PAD}" width="${W + 12}" height="${g.h}" rx="9"/>
           <text class="gh1" x="${mx + PAD + 4}" y="${g.y + PAD + 15}">${esc(fit(g.g, W / 2, 6.6))}</text>
-          <text class="gh2" x="${mx + PAD + W}" y="${g.y + PAD + 15}" text-anchor="end">${g.list.length} model${g.list.length > 1 ? "s" : ""}${r0.prefix && r0.conns.length ? ` · ${ok}/${r0.conns.length} connections ready` : ""}</text>`);
+          <text class="gh2" x="${mx + PAD + W}" y="${g.y + PAD + 15}" text-anchor="end">${g.list.length} model${g.list.length > 1 ? "s" : ""}${r0.prefix && r0.conns.length ? ` · ${ok}/${r0.conns.length} connections ready` : ""}</text></g>`);
       });
-      for (const e of [...edges.filter((e) => !e.hot), ...edges.filter((e) => e.hot)]) {
+      for (const e of [...edges.filter((e) => !e.hot && !e.foc), ...edges.filter((e) => e.foc && !e.hot), ...edges.filter((e) => e.hot)]) {
         const x1 = e.from.x + PAD + W, y1 = e.from.y + PAD + H / 2, x2 = e.to.x + PAD, d = Math.min((x2 - x1) / 2, COL * 0.6);
-        svg.push(`<path class="edge ${e.hot ? "hot" : ""}" d="M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${e.ye} ${x2},${e.ye}"><title>${esc(e.title)}</title></path>`);
+        svg.push(`<path class="edge ${e.hot ? "hot" : e.foc ? "foc" : ""} ${e.fade ? "fade" : ""}" d="M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${e.ye} ${x2},${e.ye}"><title>${esc(e.title)}</title></path>`);
       }
-      for (const e of edges) if (e.label) svg.push(`<text class="elab ${e.hot ? "hot" : ""}" x="${e.to.x + PAD - 4}" y="${e.ye - 3}" text-anchor="end">${e.label}</text>`);
+      for (const e of edges) if (e.label) svg.push(`<text class="elab ${e.hot ? "hot" : e.foc ? "foc" : ""} ${e.fade ? "fade" : ""}" x="${e.to.x + PAD - 4}" y="${e.ye - 3}" text-anchor="end">${e.label}</text>`);
       const box = (n, cls, attr, t1, t2, title, mono) => {
         const x = n.x + PAD, y = n.y + PAD;
         return `<g class="${cls}" ${attr}><title>${esc(title)}\n${esc(t2)}</title>
@@ -468,14 +479,15 @@
           <text class="t1 ${mono ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(t1, W - 20, mono ? 7.2 : 6.6))}</text>
           <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(t2, W - 20, 5.8))}</text></g>`;
       };
-      combos.forEach((c) => svg.push(box(c, "n-combo", c.path ? `data-k="${esc(c.path)}"` : "", c.t1, c.t2, c.t1)));
+      combos.forEach((c) => svg.push(box(c, `n-combo ${c.fade ? "fade" : ""} ${c.foc ? "foc" : ""}`, c.path ? `data-f="${esc(c.path)}"` : "",
+        c.t1, c.t2, `${c.t1} — click to ${c.foc ? "clear the highlight" : "highlight its routes"}`)));
       ms.forEach((m) => {
         const r = m.r, bad = r.states.filter(([s]) => s === "bad").length, refs = m.rows.length;
         m.health = r.health;
         const t2 = [[...m.tags].join(", "),
           !r.prefix ? "missing combo or alias" : r.conns.length ? `${r.ok}/${r.conns.length} ready${bad ? `, ${bad} down` : ""}` : (r.prov.known ? "no connection" : "unknown prefix"),
           refs > 1 ? `${refs} routes` : "", r.req ? `${r.req.toLocaleString()} req` : ""].filter(Boolean).join(" · ");
-        const cls = ["n-leaf", m.tags.size ? "serve" : "", usable(r) ? "" : "dead", r.flash && now() - r.flash.t < 2500 ? "flash" : ""].join(" ");
+        const cls = ["n-leaf", m.tags.size ? "serve" : "", usable(r) ? "" : "dead", m.fade ? "fade" : "", r.flash && now() - r.flash.t < 2500 ? "flash" : ""].join(" ");
         svg.push(box(m, cls, `data-l="${esc("F" + r.key)}"`, `${r.prefix ? r.prefix + "/" : ""}${r.model}`, t2, [...m.entries].join("\n"), true));
         if (m.open) r.conns.forEach((cn, k) => {
           const c = { x: mx + COL, y: m.cy + k * ROW, health: r.states[k][0] }, y1 = m.y + PAD + H / 2, y2 = c.y + PAD + H / 2;
@@ -529,7 +541,7 @@
         ${S.view === "tree" ? treeHTML(c.name, marks) : S.view === "flow" ? flowHTML(c.name, marks) : comboHTML(c.name, "", new Set(), marks)}
         <div class="legend"><span><span class="dot ok"></span>all connections ready</span><span><span class="dot warn"></span>some limited / backoff / model lock</span>
         <span><span class="dot bad"></span>connections down</span><span><span class="dot none"></span>no connection or unknown prefix</span>
-        <span>outline = would take a request now</span><span>flash = request just landed · click a model for its connections</span></div>
+        <span>outline = would take a request now</span><span>flash = request just landed · click a model for its connections${S.view === "flow" ? " · click a combo to highlight its routes" : ""}</span></div>
         <div class="feed"><b>Recent requests</b>${feed || "<div>—</div>"}</div>`;
       m.scrollTop = top;
       const tree = m.querySelector(".tree");
@@ -537,12 +549,13 @@
     }
 
     function onClick(e) {
-      const t = e.target.closest("[data-c],[data-k],[data-l],[data-v],#x,#rf");
-      if (!t) return;
+      const t = e.target.closest("[data-c],[data-k],[data-f],[data-l],[data-v],#x,#rf");
+      if (!t) { if (S.focus != null && e.target.closest(".tree")) { S.focus = null; render(); } return; }
+      if (t.dataset.f != null) { S.focus = S.focus === t.dataset.f ? null : t.dataset.f; return render(); }
       if (t.id === "x") return close();
       if (t.id === "rf") return load();
       if (t.dataset.v) { S.view = t.dataset.v; pref.set("view", S.view); return render(); }
-      if (t.dataset.c) { e.preventDefault(); S.sel = t.dataset.c; $("main").scrollTop = 0; return render(); }
+      if (t.dataset.c) { e.preventDefault(); S.sel = t.dataset.c; S.focus = null; $("main").scrollTop = 0; return render(); }
       if (t.dataset.l != null) { const k = "L" + t.dataset.l; S.open.has(k) ? S.open.delete(k) : S.open.add(k); return render(); }
       if (t.dataset.k != null) {
         const k = t.dataset.k, wasOpen = isOpenCombo(k);
