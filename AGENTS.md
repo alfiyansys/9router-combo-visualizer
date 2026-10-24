@@ -45,7 +45,9 @@ dist/9router-combo-visualizer.user.js   built file, committed (install + @update
 ## Releasing
 
 1. Bump `version` in `package.json` for every user-visible change (Tampermonkey only updates
-   when `@version` grows; semver: patch = fix, minor = feature).
+   when `@version` grows). `X.Y` marks a timeframe, not the kind of change: every release inside
+   it, feature or fix, bumps only `Z` (0.5.0 → 0.5.1 → 0.5.2). The maintainer decides when a new
+   timeframe starts and `Y` (or `X`) goes up; never bump them on your own.
 2. `npm run build && npm run check`.
 3. Commit `src/`, `package.json` and `dist/` together in the release commit.
 4. Push `main`. Installed copies pick it up via `@updateURL`.
