@@ -51,7 +51,7 @@ Updates arrive automatically through the userscript manager.
 | Open / close the overlay | **⛓ Chains** button, `Alt+Shift+C`, or the userscript menu |
 | Close | `Esc` or **Close** |
 | Pick a combo | click it in the sidebar, or a "used by" link |
-| Edit a combo | **Edit combo** next to its name, on a nested combo card, or ✎ on a combo node in Tree/Flow opens the dashboard's own edit dialog |
+| Edit a combo | switch the header to **Edit** (the overlay always opens in **Read-only**), then **Edit combo** next to its name, on a nested combo card, or ✎ on a combo node in Tree/Flow opens the dashboard's own edit dialog |
 | Sort the combo list | **Sort: Dashboard / Name A–Z** above the list (remembered per browser) |
 | Switch between cards and tree | **Cards / Tree** toggle (remembered per browser) |
 | Collapse a nested combo | click its `▾ combo …` header or tree node |
@@ -78,7 +78,8 @@ If you serve the dashboard under a custom title, use the userscript menu →
 - Runs entirely in your browser, inside the dashboard's origin, with your existing session.
 - Read-only: it issues `GET` requests to the dashboard's `/api/*` endpoints and listens to
   `/api/usage/stream`. It never changes settings, tests providers or sends requests elsewhere.
-  **Edit combo** only opens the dashboard's own edit dialog; you save there yourself.
+  It always opens in Read-only mode, with no edit controls. Edit mode only adds buttons that open the
+  dashboard's own edit dialog; you save there yourself.
 - Never displays API keys or provider credentials.
 - Plain, dependency-free JavaScript: read [`dist/9router-combo-visualizer.user.js`](dist/9router-combo-visualizer.user.js)
   before installing.
