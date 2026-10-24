@@ -17,7 +17,8 @@ overlay shows how a request actually travels through them.
   diagram of combo → entries → nested combos → models → connections, with fallback branches
   numbered and the path to the serving entry highlighted) and *Flow* (the same diagram, but each
   model appears once in a last column grouped by provider, so every route that reaches it
-  converges on one node; numbered edges keep the fallback order).
+  converges on one node; numbered edges keep the fallback order, and clicking a combo highlights
+  everything it can reach).
 - **Provider health per model:** each entry is resolved to its provider (custom node prefix,
   built-in alias, or provider id) and coloured by its connections:
   🟢 all ready · 🟡 some rate-limited, backing off or model-locked · 🔴 down or disabled ·
