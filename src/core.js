@@ -99,6 +99,8 @@
   .tree .gbg{fill:var(--chip);opacity:.45} .tree .gh1{fill:var(--ink);font-weight:600;font-size:11px} .tree .gh2{fill:var(--mute);font-size:10.5px}
   .tree .elab.hot{fill:var(--acc);font-weight:600}
   .tree .fade{opacity:.18} .tree .edge.foc{stroke:var(--alt);stroke-width:2.5} .tree .elab.foc{fill:var(--alt);font-weight:600}
+  .tree .edb{fill:var(--panel);stroke:var(--line)} .tree .edt{fill:var(--acc);font-size:12px} .tree .ed:hover .edb{stroke:var(--acc)}
+  .tree g[data-e]{cursor:pointer}
   .tree .n-combo.foc .box{stroke:var(--alt);stroke-width:2} .tree g[data-f]{cursor:pointer}`;
   const TREE = { W: 280, H: 36, COL: 330, ROW: 44, PAD: 6 };
 
@@ -332,7 +334,7 @@
     function treeNodes(name, path, seen, marks) {
       const c = comboMap().get(name);
       const ls = leaves(name);
-      const node = { kind: "combo", path, key: path, children: [], health: aggHealth(ls),
+      const node = { kind: "combo", path, key: path, children: [], health: aggHealth(ls), name: c ? name : "",
         t1: (path ? (isOpenCombo(path) ? "▾ " : "▸ ") : "") + "combo " + name,
         t2: c ? `${strategyOf(c)} · ${c.models.length} entries · ${ls.length} models` : "not found" };
       if (!c) return node;
@@ -373,6 +375,12 @@
 
     const fit = (s, px, cw) => { const n = Math.floor(px / cw); return s.length > n ? s.slice(0, Math.max(n - 1, 1)) + "…" : s; };
 
+    // pencil in the top-right corner of a combo node; it sits inside the node's <g>, and onClick
+    // resolves the nearest data-* first, so it never also collapses or highlights the node
+    const editGlyph = (name, x, y) => `<g class="ed" data-e="${esc(name)}"><title>Edit combo ${esc(name)} in the dashboard</title>
+      <rect class="edb" x="${x + TREE.W - 30}" y="${y + 7}" width="22" height="20" rx="5"/>
+      <text class="edt" x="${x + TREE.W - 19}" y="${y + 21}" text-anchor="middle">✎</text></g>`;
+
     function treeHTML(name, marks) {
       const root = treeNodes(name, "", new Set(), marks), { w, h } = layout(root);
       const hot = new Set();
@@ -392,7 +400,7 @@
         boxes.push(`<g class="${cls}" ${attr}><title>${esc(n.entry || n.t1)}\n${esc(sub)}</title>
           <rect class="box" x="${x}" y="${y}" width="${W}" height="${H}" rx="7"/>
           <rect class="stripe ${n.health}" x="${x}" y="${y}" width="4" height="${H}" rx="2"/>
-          <text class="t1 ${n.kind === "leaf" ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(n.t1, W - 20, n.kind === "leaf" ? 7.2 : 6.6))}</text>
+          <text class="t1 ${n.kind === "leaf" ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(n.t1, W - (n.name ? 44 : 20), n.kind === "leaf" ? 7.2 : 6.6))}</text>${n.name ? editGlyph(n.name, x, y) : ""}
           <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(sub, W - 20, 5.8))}</text></g>`);
       })(root);
       return `<div class="tree"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Chain tree of ${esc(name)}">
@@ -409,7 +417,7 @@
       // pass 1: walk like the tree; every leaf occurrence gets a provisional row, used as a barycenter
       (function walk(cname, path, depth, seen) {
         const c = comboMap().get(cname), ls = leaves(cname), first = row;
-        const node = { kind: "combo", path, depth, kids: [], health: aggHealth(ls),
+        const node = { kind: "combo", path, depth, kids: [], health: aggHealth(ls), name: c ? cname : "",
           t1: "combo " + cname,
           t2: c ? `${strategyOf(c)} · ${c.models.length} entries · ${ls.length} models` : "not found" };
         combos.push(node); maxDepth = Math.max(maxDepth, depth);
@@ -507,8 +515,8 @@
         return `<g class="${cls}" ${attr}><title>${esc(title)}\n${esc(t2)}</title>
           <rect class="box" x="${x}" y="${y}" width="${W}" height="${H}" rx="7"/>
           <rect class="stripe ${n.health}" x="${x}" y="${y}" width="4" height="${H}" rx="2"/>
-          <text class="t1 ${mono ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(t1, W - 20, mono ? 7.2 : 6.6))}</text>
-          <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(t2, W - 20, 5.8))}</text></g>`;
+          <text class="t1 ${mono ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(t1, W - (n.name ? 44 : 20), mono ? 7.2 : 6.6))}</text>
+          <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(t2, W - 20, 5.8))}</text>${n.name ? editGlyph(n.name, x, y) : ""}</g>`;
       };
       combos.forEach((c) => svg.push(box(c, `n-combo ${c.fade ? "fade" : ""} ${c.foc ? "foc" : ""}`, c.path ? `data-f="${esc(c.path)}"` : "",
         c.t1, c.t2, `${c.t1} — click to ${c.foc ? "clear the highlight" : "highlight its routes"}`)));
