@@ -117,7 +117,7 @@
   };
 
   function create() {
-    let host = null, root = null, es = null, timers = [], onKey = null, pend = false;
+    let host = null, root = null, es = null, timers = [], onKey = null, pend = false, drawn = "";
     const S = { combos: [], conns: [], nodes: [], aliases: {}, settings: {}, live: null, liveOk: false,
                 sel: null, q: "", open: new Set(), shut: new Set(), flash: new Map(), lastSeen: null, loadedAt: null, err: null,
                 view: pref.get("view", "cards") };
@@ -509,7 +509,10 @@
           ${healthBar(ls)}</div>`;
       }).join("") || `<div class="empty" style="padding:12px">no match</div>`;
 
-      const m = $("main"), top = m.scrollTop, c = cm.get(S.sel);
+      // the 1s tick rebuilds the diagram, so carry its horizontal scroll over while combo and view stay the same
+      const m = $("main"), top = m.scrollTop, c = cm.get(S.sel), shown = S.sel + "|" + S.view;
+      const left = shown === drawn ? m.querySelector(".tree")?.scrollLeft || 0 : 0;
+      drawn = shown;
       if (!c) { m.innerHTML = `<div class="empty">${S.err ? esc(S.err) : "Loading…"}</div>`; return; }
       const ls = leaves(c.name), by = usedBy(c.name), marks = new Map();
       marks.served = new Set();
@@ -529,6 +532,8 @@
         <span>outline = would take a request now</span><span>flash = request just landed · click a model for its connections</span></div>
         <div class="feed"><b>Recent requests</b>${feed || "<div>—</div>"}</div>`;
       m.scrollTop = top;
+      const tree = m.querySelector(".tree");
+      if (tree) tree.scrollLeft = left;
     }
 
     function onClick(e) {
