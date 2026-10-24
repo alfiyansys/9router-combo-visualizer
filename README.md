@@ -31,7 +31,7 @@ overlay shows how a request actually travels through them.
   flight, a flash when one completes, and a recent-requests feed, all from the dashboard's own
   usage stream.
 - **Cross-references:** which combos nest a combo ("used by"), plus a filter over combo and model
-  names.
+  names. The combo list keeps the dashboard's order or sorts by name.
 
 ## Install
 
@@ -51,6 +51,7 @@ Updates arrive automatically through the userscript manager.
 | Open / close the overlay | **⛓ Chains** button, `Alt+Shift+C`, or the userscript menu |
 | Close | `Esc` or **Close** |
 | Pick a combo | click it in the sidebar, or a "used by" link |
+| Sort the combo list | **Sort: Dashboard / Name A–Z** above the list (remembered per browser) |
 | Switch between cards and tree | **Cards / Tree** toggle (remembered per browser) |
 | Collapse a nested combo | click its `▾ combo …` header or tree node |
 | See a model's connections | click the model row or tree node |
