@@ -34,6 +34,9 @@ dist/9router-combo-visualizer.user.js   built file, committed (install + @update
   as the placeholder in docs.
 - **Read-only:** the overlay only issues `GET` requests and opens the usage `EventSource`. Never
   add calls that change 9router state (POST/PUT/DELETE, provider tests, model tests).
+  **Edit combo** is a hand-off, not a write: it opens `/dashboard/combos` and presses that combo
+  card's own Edit button (found via the `Select <name>` checkbox label). Saving stays in the
+  dashboard's dialog, done by the user. Re-check those selectors when 9router's combos page changes.
 - **No secrets in the UI or repo:** never render or log API keys, tokens or provider credentials.
   `/api/providers` returns more than the overlay needs, so pick fields explicitly.
 - **Everything inside a shadow root** so the dashboard's CSS cannot leak in and ours cannot leak
@@ -77,7 +80,7 @@ There is no test suite; verify in a real dashboard:
 
 Check at least, in the Cards, Tree and Flow views: a nested combo, a round-robin combo, an empty
 combo, a combo with an unknown prefix or a reference to a missing combo, connection details on
-click, collapsing a nested combo (Tree/Cards) or highlighting its routes (Flow), dragging to pan a Tree/Flow wider and taller than the window
+click, **Edit combo** (from another page and from the combos page itself), collapsing a nested combo (Tree/Cards) or highlighting its routes (Flow), dragging to pan a Tree/Flow wider and taller than the window
 (a drag must not toggle the node it started on), light and dark mode, and the stream reconnect state.
 
 ## 9router API contract
