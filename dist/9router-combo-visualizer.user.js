@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         9router Combo Visualizer
 // @namespace    https://github.com/alfiyansys/9router-combo-visualizer
-// @version      0.2.0
+// @version      0.2.1
 // @description  Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.
 // @author       alfiyansys
 // @license      MIT
@@ -72,7 +72,7 @@
   .lw{flex:1;min-width:0}
   .leaf{display:flex;gap:8px;align-items:center;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);cursor:pointer;min-width:0}
   .leaf.serve{outline:2px solid var(--acc);outline-offset:-1px}
-  .leaf.dead{opacity:.55}
+  .leaf.dead{opacity:.55} .leaf.dup{opacity:.4;border-style:dashed}
   .pfx{font:600 11px ui-monospace,monospace;padding:1px 6px;border-radius:4px;background:var(--chip)}
   .md{font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .pv{color:var(--mute);font-size:11px;white-space:nowrap}
@@ -106,7 +106,7 @@
   .tree .n-combo .box{fill:var(--chip)}
   .tree .n-conn .box{fill:var(--panel);stroke-dasharray:3 2}
   .tree .serve .box{stroke:var(--acc);stroke-width:2}
-  .tree .dead{opacity:.55}
+  .tree .dead{opacity:.55} .tree .dup{opacity:.4} .tree .dup .box{stroke-dasharray:4 3}
   .tree .flash .box{animation:tfl 2.2s ease-out}
   @keyframes tfl{0%{fill:color-mix(in srgb,var(--acc) 35%,var(--bg))}100%{fill:var(--bg)}}
   .tree .t1{fill:var(--ink)} .tree .t1.mono{font-family:ui-monospace,monospace}
@@ -216,7 +216,8 @@
         (S.live?.activeRequests || []).some((a) => a.model === model || a.model?.endsWith("/" + model));
       let flash = null;
       for (const [k, v] of S.flash) { const [m, p] = k.split("|"); if ((m === model || m === entry) && provIds.has(p)) flash = v; }
-      return { type: "leaf", entry, prefix, model, prov, conns, states, ok, warn, health, req, last, busy, flash };
+      const key = `${model}|${[...provIds].sort()}`; // traffic identity: the stream knows model + provider, not the combo
+      return { type: "leaf", entry, prefix, model, prov, conns, states, ok, warn, health, req, last, busy, flash, key };
     }
 
     function leaves(name, seen = new Set()) {
@@ -239,11 +240,17 @@
       for (let i = 0; i < c.models.length; i++) {
         const r = resolveEntry(c.models[i]), p = `${path}/${i}`;
         const t = ordered ? tag : "candidate";
-        const hit = r.type === "combo" ? plan(r.name, p, s2, out, t) : usable(r) && (out.set(p, t), true);
+        const hit = r.type === "combo" ? plan(r.name, p, s2, out, t) : usable(r) && (out.set(p, t), out.served?.add(r.key), true);
         if (hit) { any = true; if (ordered) break; }
       }
       return any;
     }
+
+    // Traffic can't be tied to a combo, so when one model+provider shows up more than once in a chain,
+    // light only the occurrence(s) the plan would route to; unplanned copies are dimmed and stay quiet.
+    const dup = (r, path, marks) => !marks.has(path) && !!marks.served?.has(r.key);
+    const lit = (r, path, marks) => !dup(r, path, marks);
+    const DUP = "same model serves elsewhere in this chain";
 
     // ---- render ----
     function render() {
@@ -264,9 +271,9 @@
     }
 
     function leafHTML(r, i, path, marks) {
-      const tag = marks.get(path), openConns = S.open.has("L" + path);
-      const cls = ["leaf", tag ? "serve" : "", usable(r) ? "" : "dead",
-        r.flash && now() - r.flash.t < 2500 ? "flash" : "", r.busy ? "busy" : ""].join(" ");
+      const tag = marks.get(path), openConns = S.open.has("L" + path), on = lit(r, path, marks);
+      const cls = ["leaf", tag ? "serve" : "", usable(r) ? "" : "dead", on ? "" : "dup",
+        on && r.flash && now() - r.flash.t < 2500 ? "flash" : "", on && r.busy ? "busy" : ""].join(" ");
       const bad = r.states.filter(([s]) => s === "bad").length;
       const connTxt = !r.prefix ? `<span class="bad-t">missing combo or alias</span>`
         : !r.conns.length ? `<span class="bad-t">${r.prov.known ? "no connection" : "unknown prefix"}</span>`
@@ -282,7 +289,7 @@
         <span class="dot ${r.health}"></span><span class="pfx">${esc(r.prefix || "—")}</span>
         <span class="md">${esc(r.model)}</span>${r.via ? `<span class="badge">alias ${esc(r.via)}</span>` : ""}
         <span class="pv">${r.prefix ? esc(r.prov.label) : ""}</span>
-        <span class="st">${connTxt}<br>${r.req ? `${r.req.toLocaleString()} req` : "no traffic"}${r.last ? ` · ${ago(r.last)} ago` : ""}${tag ? ` · <span class="acc-t">${tag}</span>` : ""}</span>
+        <span class="st">${connTxt}<br>${r.req ? `${r.req.toLocaleString()} req` : "no traffic"}${r.last ? ` · ${ago(r.last)} ago` : ""}${tag ? ` · <span class="acc-t">${tag}</span>` : ""}${on ? "" : ` · ${DUP}`}</span>
         </div>${conns}</div></div>`;
     }
 
@@ -323,10 +330,10 @@
         if (r.type === "combo") ch = treeNodes(r.name, p, s2, marks);
         else {
           const tag = marks.get(p), bad = r.states.filter(([s]) => s === "bad").length;
-          ch = { kind: "leaf", path: p, entry: r.entry, health: r.health, tag, dead: !usable(r), children: [],
-            flash: r.flash && now() - r.flash.t < 2500,
+          ch = { kind: "leaf", path: p, entry: r.entry, health: r.health, tag, dead: !usable(r), dup: dup(r, p, marks), children: [],
+            flash: lit(r, p, marks) && r.flash && now() - r.flash.t < 2500,
             t1: `${r.prefix ? r.prefix + "/" : ""}${r.model}`,
-            t2: [tag || "", r.prefix ? r.prov.label : "",
+            t2: [tag || "", dup(r, p, marks) ? DUP : "", r.prefix ? r.prov.label : "",
               !r.prefix ? "missing combo or alias" : r.conns.length ? `${r.ok}/${r.conns.length} ready${bad ? `, ${bad} down` : ""}` : (r.prov.known ? "no connection" : "unknown prefix"),
               r.req ? `${r.req.toLocaleString()} req` : ""].filter(Boolean).join(" · ") };
           if (S.open.has("L" + p)) ch.children = r.conns.map((cn, k) => ({ kind: "conn", path: `${p}#${k}`, children: [],
@@ -364,7 +371,7 @@
           if (c.edge) edges.push(`<text class="elab" x="${x2 - 12}" y="${y2 - 4}" text-anchor="end">${c.edge}</text>`);
           walk(c);
         }
-        const cls = [`n-${n.kind}`, n.tag ? "serve" : "", n.dead ? "dead" : "", n.flash ? "flash" : ""].join(" ");
+        const cls = [`n-${n.kind}`, n.tag ? "serve" : "", n.dead ? "dead" : "", n.dup ? "dup" : "", n.flash ? "flash" : ""].join(" ");
         const attr = n.kind === "combo" && n.path ? `data-k="${esc(n.path)}"` : n.kind === "leaf" ? `data-l="${esc(n.path)}"` : "";
         const sub = n.t2;
         boxes.push(`<g class="${cls}" ${attr}><title>${esc(n.entry || n.t1)}\n${esc(sub)}</title>
@@ -401,6 +408,7 @@
       const m = $("main"), top = m.scrollTop, c = cm.get(S.sel);
       if (!c) { m.innerHTML = `<div class="empty">${S.err ? esc(S.err) : "Loading…"}</div>`; return; }
       const ls = leaves(c.name), by = usedBy(c.name), marks = new Map();
+      marks.served = new Set();
       plan(c.name, "", new Set(), marks, "serves now");
       const cnt = (h) => ls.filter((l) => l.health === h).length;
       const feed = (L?.recentRequests || []).slice(0, 8).map((r) =>
