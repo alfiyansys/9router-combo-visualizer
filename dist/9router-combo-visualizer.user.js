@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         9router Combo Visualizer
 // @namespace    https://github.com/alfiyansys/9router-combo-visualizer
-// @version      0.3.0
+// @version      0.4.0
 // @description  Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.
 // @author       alfiyansys
 // @license      MIT
@@ -52,6 +52,7 @@
   button{font:inherit;color:inherit;background:var(--chip);border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer}
   aside{border-right:1px solid var(--line);overflow:auto;background:var(--panel)}
   aside input{box-sizing:border-box;width:calc(100% - 20px);margin:10px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+  .srt{display:flex;gap:8px;align-items:center;margin:-4px 10px 6px;color:var(--mute);font-size:12px}
   .it{padding:7px 12px;cursor:pointer;border-left:3px solid transparent}
   .it:hover,.it.on{background:var(--chip)} .it.on{border-left-color:var(--acc)}
   .r1{display:flex;gap:6px;align-items:center} .nm{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -142,7 +143,7 @@
     let host = null, root = null, es = null, timers = [], onKey = null, pend = false, drawn = "";
     const S = { combos: [], conns: [], nodes: [], aliases: {}, settings: {}, live: null, liveOk: false,
                 sel: null, focus: null, q: "", open: new Set(), shut: new Set(), flash: new Map(), lastSeen: null, loadedAt: null, err: null,
-                view: pref.get("view", "cards") };
+                view: pref.get("view", "cards"), sort: pref.get("sort", "dashboard") };
     const $ = (id) => root.getElementById(id);
 
     // ---- data ----
@@ -530,6 +531,9 @@
 
       const cm = comboMap(), q = S.q.toLowerCase();
       const list = S.combos.filter((c) => !q || c.name.toLowerCase().includes(q) || c.models.some((m) => m.toLowerCase().includes(q)));
+      // numeric collation so "combo-2" sorts before "combo-10"; "dashboard" keeps 9router's own order
+      if (S.sort === "name") list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+      root.querySelectorAll("[data-s]").forEach((b) => b.classList.toggle("on", b.dataset.s === S.sort));
       $("side").innerHTML = list.map((c) => {
         const ls = leaves(c.name), nested = c.models.some((m) => cm.has(m)), by = usedBy(c.name);
         const hot = ls.some((l) => l.busy || (l.flash && now() - l.flash.t < 60000));
@@ -569,12 +573,13 @@
     }
 
     function onClick(e) {
-      const t = e.target.closest("[data-c],[data-k],[data-f],[data-l],[data-v],#x,#rf");
+      const t = e.target.closest("[data-c],[data-k],[data-f],[data-l],[data-v],[data-s],#x,#rf");
       if (!t) { if (S.focus != null && e.target.closest(".tree")) { S.focus = null; render(); } return; }
       if (t.dataset.f != null) { S.focus = S.focus === t.dataset.f ? null : t.dataset.f; return render(); }
       if (t.id === "x") return close();
       if (t.id === "rf") return load();
       if (t.dataset.v) { S.view = t.dataset.v; pref.set("view", S.view); return render(); }
+      if (t.dataset.s) { S.sort = t.dataset.s; pref.set("sort", S.sort); return render(); }
       if (t.dataset.c) { e.preventDefault(); S.sel = t.dataset.c; S.focus = null; $("main").scrollTop = 0; return render(); }
       if (t.dataset.l != null) { const k = "L" + t.dataset.l; S.open.has(k) ? S.open.delete(k) : S.open.add(k); return render(); }
       if (t.dataset.k != null) {
@@ -594,7 +599,9 @@
       root.innerHTML = `<style>${CSS}</style><div class="w"><header><b>Combo chains</b>
         <span class="pill" id="live"><span class="dot"></span>stream</span><span class="pill" id="info"></span><span class="sp"></span>
         <button id="rf">Refresh</button><button id="x">Close (Esc)</button></header>
-        <aside><input id="q" placeholder="Filter combo / model…"><div id="side"></div></aside><main id="main"></main></div>`;
+        <aside><input id="q" placeholder="Filter combo / model…">
+        <div class="srt">Sort<span class="seg"><button data-s="dashboard">Dashboard</button><button data-s="name">Name A–Z</button></span></div>
+        <div id="side"></div></aside><main id="main"></main></div>`;
       root.addEventListener("click", onClick);
       $("q").addEventListener("input", (e) => { S.q = e.target.value; render(); });
       onKey = (e) => { if (e.key === "Escape") close(); };
