@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         9router Combo Visualizer
 // @namespace    https://github.com/alfiyansys/9router-combo-visualizer
-// @version      0.4.0
+// @version      0.5.0
 // @description  Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.
 // @author       alfiyansys
 // @license      MIT
@@ -98,7 +98,8 @@
   .empty{color:var(--mute);padding:30px 0}
   .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
   .seg button{border:0;border-radius:0;background:transparent;color:var(--mute)} .seg button.on{background:var(--chip);color:var(--ink);font-weight:600}
-  .tree{overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px}
+  .tree{cursor:grab;overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px}
+  main.pan .tree,main.pan .tree g{cursor:grabbing;user-select:none}
   .tree svg{display:block;font:12px ui-sans-serif,system-ui,sans-serif}
   .tree .edge{fill:none;stroke:var(--line);stroke-width:1.5}
   .tree .edge.hot{stroke:var(--acc);stroke-width:2.5}
@@ -140,7 +141,7 @@
   };
 
   function create() {
-    let host = null, root = null, es = null, timers = [], onKey = null, pend = false, drawn = "";
+    let host = null, root = null, es = null, timers = [], onKey = null, pend = false, drawn = "", pan = null, dragged = false;
     const S = { combos: [], conns: [], nodes: [], aliases: {}, settings: {}, live: null, liveOk: false,
                 sel: null, focus: null, q: "", open: new Set(), shut: new Set(), flash: new Map(), lastSeen: null, loadedAt: null, err: null,
                 view: pref.get("view", "cards"), sort: pref.get("sort", "dashboard") };
@@ -565,14 +566,44 @@
         ${S.view === "tree" ? treeHTML(c.name, marks) : S.view === "flow" ? flowHTML(c.name, marks) : comboHTML(c.name, "", new Set(), marks)}
         <div class="legend"><span><span class="dot ok"></span>all connections ready</span><span><span class="dot warn"></span>some limited / backoff / model lock</span>
         <span><span class="dot bad"></span>connections down</span><span><span class="dot none"></span>no connection or unknown prefix</span>
-        <span>outline = would take a request now</span><span>flash = request just landed · click a model for its connections${S.view === "flow" ? " · click a combo to highlight its routes" : ""}</span></div>
+        <span>outline = would take a request now</span><span>flash = request just landed · click a model for its connections${S.view === "flow" ? " · click a combo to highlight its routes" : ""}${S.view === "cards" ? "" : " · drag to pan"}</span></div>
         <div class="feed"><b>Recent requests</b>${feed || "<div>—</div>"}</div>`;
       m.scrollTop = top;
       const tree = m.querySelector(".tree");
       if (tree) tree.scrollLeft = left;
     }
 
+    // drag the diagram to pan: x scrolls the .tree box, y scrolls main. The 1s tick rebuilds .tree,
+    // so look it up on every move instead of holding the element. Touch already pans natively.
+    function onPan(e) {
+      dragged = false;
+      if (e.button !== 0 || e.pointerType === "touch" || !e.target.closest(".tree")) return;
+      const m = $("main");
+      pan = { x: e.clientX, y: e.clientY, left: m.querySelector(".tree").scrollLeft, top: m.scrollTop, moved: false };
+      e.preventDefault(); // no text selection while dragging
+      addEventListener("pointermove", onPanMove);
+      addEventListener("pointerup", onPanEnd);
+      addEventListener("pointercancel", onPanEnd);
+    }
+    function onPanMove(e) {
+      if (!pan || !root) return;
+      const dx = e.clientX - pan.x, dy = e.clientY - pan.y;
+      if (!pan.moved && Math.hypot(dx, dy) < 4) return; // small jitter is still a click
+      const m = $("main"), t = m.querySelector(".tree");
+      pan.moved = true; m.classList.add("pan");
+      if (t) t.scrollLeft = pan.left - dx;
+      m.scrollTop = pan.top - dy;
+    }
+    function onPanEnd() {
+      removeEventListener("pointermove", onPanMove);
+      removeEventListener("pointerup", onPanEnd);
+      removeEventListener("pointercancel", onPanEnd);
+      if (pan?.moved) { dragged = true; root && $("main").classList.remove("pan"); } // swallow the click that ends a drag
+      pan = null;
+    }
+
     function onClick(e) {
+      if (dragged) { dragged = false; return; }
       const t = e.target.closest("[data-c],[data-k],[data-f],[data-l],[data-v],[data-s],#x,#rf");
       if (!t) { if (S.focus != null && e.target.closest(".tree")) { S.focus = null; render(); } return; }
       if (t.dataset.f != null) { S.focus = S.focus === t.dataset.f ? null : t.dataset.f; return render(); }
@@ -603,6 +634,7 @@
         <div class="srt">Sort<span class="seg"><button data-s="dashboard">Dashboard</button><button data-s="name">Name A–Z</button></span></div>
         <div id="side"></div></aside><main id="main"></main></div>`;
       root.addEventListener("click", onClick);
+      root.addEventListener("pointerdown", onPan);
       $("q").addEventListener("input", (e) => { S.q = e.target.value; render(); });
       onKey = (e) => { if (e.key === "Escape") close(); };
       document.addEventListener("keydown", onKey);
@@ -613,6 +645,7 @@
 
     function close() {
       timers.forEach(clearInterval); timers = [];
+      onPanEnd();
       es?.close(); es = null;
       if (onKey) document.removeEventListener("keydown", onKey);
       host?.remove(); host = root = null;
