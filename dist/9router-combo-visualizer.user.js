@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         9router Combo Visualizer
 // @namespace    https://github.com/alfiyansys/9router-combo-visualizer
-// @version      0.5.3
+// @version      0.5.4
 // @description  Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.
 // @author       alfiyansys
 // @license      MIT
@@ -138,30 +138,48 @@
     set: (k, v) => { try { localStorage.setItem("nr-combo-viz:" + k, v); } catch {} },
   };
   // Edit hands off to the dashboard's own edit dialog; the overlay itself never writes. 9router has no
-  // URL for that dialog, so remember the combo, go to the combos page if needed, then press the Edit
-  // button on that combo's card once the list has rendered.
+  // URL for that dialog, so go to the combos page if needed, press the Edit button on that combo's card,
+  // wait for the dialog to come and go, then bring the overlay back where it was.
   const EDIT_KEY = "nr-combo-viz:edit", COMBOS_PAGE = "/dashboard/combos";
-  function pressEdit(name) {
+  let reopen = null, parked = null; // the live instance's restore hook, and a restore waiting for one
+  const resume = (st) => (reopen ? reopen(st) : (parked = st));
+  // the dashboard's modal is a fixed full-screen layer (div.fixed.inset-0); compare against the layers
+  // that already existed before the click, so a permanent backdrop elsewhere cannot be mistaken for it
+  function watchDialog(before, done) {
+    const t0 = now();
+    let dlg = null;
+    const tick = () => {
+      if (!dlg) dlg = [...document.querySelectorAll("div.fixed.inset-0")].find((el) => !before.has(el)) || null;
+      if (dlg ? !dlg.isConnected : now() - t0 > 5000) return done(); // closed, or never showed up
+      setTimeout(tick, 300);
+    };
+    tick();
+  }
+  function pressEdit(name, done) {
     const t0 = now();
     const tick = () => {
       const box = [...document.querySelectorAll("input[type=checkbox][aria-label]")].find((i) => i.getAttribute("aria-label") === "Select " + name);
       let card = box;
       while (card && !card.querySelector?.('button[title="Edit"]')) card = card.parentElement;
       const btns = card ? card.querySelectorAll('button[title="Edit"]') : [];
-      if (btns.length === 1) return btns[0].click(); // more than one means we climbed past the card
-      if (now() - t0 < 15000) setTimeout(tick, 250);
+      if (btns.length === 1) { // more than one means we climbed past the card
+        const before = new Set(document.querySelectorAll("div.fixed.inset-0"));
+        btns[0].click();
+        return watchDialog(before, done);
+      }
+      if (now() - t0 < 15000) setTimeout(tick, 250); else done();
     };
     tick();
   }
-  function editCombo(name) {
-    if (location.pathname === COMBOS_PAGE) return pressEdit(name);
-    try { sessionStorage.setItem(EDIT_KEY, name); } catch {}
+  function editCombo(st, back) {
+    if (location.pathname === COMBOS_PAGE) return pressEdit(st.name, back);
+    try { sessionStorage.setItem(EDIT_KEY, JSON.stringify(st)); } catch {}
     location.assign(COMBOS_PAGE);
   }
   function resumeEdit() {
-    let name = null;
-    try { name = sessionStorage.getItem(EDIT_KEY); sessionStorage.removeItem(EDIT_KEY); } catch {}
-    if (name && location.pathname === COMBOS_PAGE) pressEdit(name);
+    let st = null;
+    try { st = JSON.parse(sessionStorage.getItem(EDIT_KEY)); sessionStorage.removeItem(EDIT_KEY); } catch {}
+    if (st?.name && location.pathname === COMBOS_PAGE) pressEdit(st.name, () => resume(st));
   }
 
   const getJSON = async (u) => {
@@ -171,7 +189,7 @@
   };
 
   function create() {
-    let host = null, root = null, es = null, timers = [], onKey = null, pend = false, drawn = "", pan = null, dragged = false;
+    let host = null, root = null, es = null, timers = [], onKey = null, pend = false, drawn = "", pan = null, dragged = false, hidden = false;
     const S = { combos: [], conns: [], nodes: [], aliases: {}, settings: {}, live: null, liveOk: false,
                 sel: null, focus: null, q: "", open: new Set(), shut: new Set(), flash: new Map(), lastSeen: null, loadedAt: null, err: null,
                 view: pref.get("view", "cards"), sort: pref.get("sort", "dashboard"), edit: false };
@@ -646,7 +664,11 @@
       if (!t) { if (S.focus != null && e.target.closest(".tree")) { S.focus = null; render(); } return; }
       if (t.dataset.f != null) { S.focus = S.focus === t.dataset.f ? null : t.dataset.f; return render(); }
       if (t.id === "x") return close();
-      if (t.dataset.e) { const name = t.dataset.e; close(); return editCombo(name); }
+      if (t.dataset.e) {
+        const st = snapshot(t.dataset.e);
+        hide();
+        return editCombo(st, () => { if (hidden) restore(st); }); // skip if the user closed it meanwhile
+      }
       if (t.id === "rf") return load();
       if (t.dataset.v) { S.view = t.dataset.v; pref.set("view", S.view); return render(); }
       if (t.dataset.s) { S.sort = t.dataset.s; pref.set("sort", S.sort); return render(); }
@@ -679,14 +701,32 @@
       root.addEventListener("click", onClick);
       root.addEventListener("pointerdown", onPan);
       $("q").addEventListener("input", (e) => { S.q = e.target.value; render(); });
-      onKey = (e) => { if (e.key === "Escape") close(); };
+      onKey = (e) => { if (e.key === "Escape" && !hidden) close(); }; // Esc while hidden belongs to the dialog
       document.addEventListener("keydown", onKey);
       timers = [setInterval(load, POLL_MS), setInterval(render, 1000)]; // 1s tick fades flashes and refreshes "ago"
       load();
       stream();
     }
 
+    // edit hand-off: hide rather than close, so selection, view and scroll survive the dialog.
+    // visibility (not display) keeps the layout, so the 1s tick still reads the real scroll offsets.
+    const snapshot = (name) => {
+      const m = $("main");
+      return { name, sel: S.sel, edit: S.edit, q: S.q, top: m.scrollTop, left: m.querySelector(".tree")?.scrollLeft || 0 };
+    };
+    function hide() { hidden = true; host.style.visibility = "hidden"; }
+    async function restore(st) {
+      if (!host) open(); // a fresh page after the hop to the combos page
+      hidden = false; host.style.visibility = "";
+      S.sel = st.sel || S.sel; S.edit = !!st.edit; S.q = st.q || ""; $("q").value = S.q;
+      await load(); // pick up whatever was saved in the dialog
+      const m = $("main"), t = m.querySelector(".tree");
+      m.scrollTop = st.top || 0;
+      if (t) t.scrollLeft = st.left || 0;
+    }
+
     function close() {
+      hidden = false;
       timers.forEach(clearInterval); timers = [];
       onPanEnd();
       es?.close(); es = null;
@@ -694,6 +734,8 @@
       host?.remove(); host = root = null;
     }
 
+    reopen = restore;
+    if (parked) { const st = parked; parked = null; restore(st); }
     return { open, close, toggle: () => (host ? close() : open()), isOpen: () => !!host };
   }
 
