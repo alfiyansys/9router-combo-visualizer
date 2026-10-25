@@ -51,7 +51,7 @@ Updates arrive automatically through the userscript manager.
 | Open / close the overlay | **⛓ Chains** button, `Alt+Shift+C`, or the userscript menu |
 | Close | `Esc` or **Close** |
 | Pick a combo | click it in the sidebar, or a "used by" link |
-| Edit a combo | switch the header to **Edit** (the overlay always opens in **Read-only**), then **Edit combo** next to its name, on a nested combo card, or ✎ on a combo node in Tree/Flow opens the dashboard's own edit dialog |
+| Edit a combo | switch the header to **Edit** (the overlay always opens in **Read-only**), then **Edit combo** next to its name, on a nested combo card, or ✎ on a combo node in Tree/Flow opens the dashboard's own edit dialog; the overlay steps aside and comes back where you left it, with fresh data, once the dialog closes |
 | Sort the combo list | **Sort: Dashboard / Name A–Z** above the list (remembered per browser) |
 | Switch between cards and tree | **Cards / Tree** toggle (remembered per browser) |
 | Collapse a nested combo | click its `▾ combo …` header or tree node |
