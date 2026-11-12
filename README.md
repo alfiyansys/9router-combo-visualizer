@@ -100,7 +100,7 @@ Built and tested against **9router v0.5.109**. The overlay relies on the dashboa
 - "Serves now" is a prediction from connection health. Sticky round-robin state and smart/fusion
   scoring are not exposed by the API.
 - Context windows come from 9router's own capability table (`/api/models`, the numbers its combos
-  page shows), not from the providers. Models it does not know get its 200K default, which looks
+  page shows), not from the providers. Entries behind custom nodes are matched by model name. Models it does not know get its 200K default, which looks
   the same as a real 200K model. On a 9router without that endpoint the context window is hidden.
 - Built-in provider aliases (e.g. `oc` → `opencode`) come from a snapshot of 9router's catalog,
   so aliases added in newer versions show as *unknown prefix* until the snapshot is refreshed.

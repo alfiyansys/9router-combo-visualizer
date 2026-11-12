@@ -98,7 +98,7 @@ Endpoints used (all `GET`, cookie auth), verified against 9router v0.5.109:
 | `/api/providers` | `connections[]`: `provider`, `name`, `priority`, `isActive`, `testStatus`, `errorCode`, `backoffLevel`, `rateLimitedUntil`, `modelLock_<model>`, `lastError`, `lastUsedAt`, `providerSpecificData.prefix` |
 | `/api/provider-nodes` | `nodes[]`: `id`, `name`, `prefix` |
 | `/api/models/alias` | `aliases` (bare name → `provider/model`) |
-| `/api/models` | `models[]`: `fullModel` (`provider/model`), `routedModel` (`alias/model`), `caps.contextWindow`, `caps.maxOutput`; optional, the context window is hidden without it |
+| `/api/models` | `models[]`: `fullModel` (`provider/model`), `routedModel` (`alias/model`), `caps.contextWindow`, `caps.maxOutput`, `model`; optional, the context window is hidden without it. Lookup: exact entry, then `provider/model`, then the bare model name (most common value), as 9router's table is keyed by model id |
 | `/api/usage/stream` | SSE: `byModel{rawModel,provider,requests,lastUsed}`, `pending.byModel`, `activeRequests`, `recentRequests`, `totalRequests` |
 
 Known strategies: `fallback`, `round-robin`, `random`, `smart`, `fusion` (see `STRATEGY` in
