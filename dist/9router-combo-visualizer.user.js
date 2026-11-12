@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         9router Combo Visualizer
 // @namespace    https://github.com/alfiyansys/9router-combo-visualizer
-// @version      0.6.0
+// @version      0.6.1
 // @description  Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.
 // @author       alfiyansys
 // @license      MIT
@@ -127,18 +127,15 @@
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const now = () => Date.now();
+  const lastSeg = (s) => s.slice(s.lastIndexOf("/") + 1);
   const ago = (t) => {
     if (!t) return "";
     const s = (now() - new Date(t)) / 1000;
     if (isNaN(s)) return "";
     return s < 60 ? `${s | 0}s` : s < 3600 ? `${(s / 60) | 0}m` : s < 86400 ? `${(s / 3600) | 0}h` : `${(s / 86400) | 0}d`;
   };
-  // token counts the way model cards write them: 32768 -> 32K, 128000 -> 128K, 1048576 -> 1M
-  const tok = (n) => {
-    if (!n) return "?";
-    const [u, k] = n >= 1e6 ? ["M", 1e6] : ["K", 1e3], bin = k === 1e6 ? 1048576 : 1024;
-    return `${+(n / (n % k && !(n % bin) ? bin : k)).toFixed(1)}${u}`; // decimal unless it is an exact binary size
-  };
+  // decimal, like 9router's own combos page, so the numbers read the same in both (262144 -> 262K)
+  const tok = (n) => !n ? "?" : n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1e3)}K`;
   // per-viewer preference only; storage can be unavailable, so never depend on it
   const pref = {
     get: (k, d) => { try { return localStorage.getItem("nr-combo-viz:" + k) ?? d; } catch { return d; } },
@@ -197,7 +194,7 @@
 
   function create() {
     let host = null, root = null, es = null, timers = [], onKey = null, pend = false, drawn = "", pan = null, dragged = false, hidden = false;
-    const S = { combos: [], conns: [], nodes: [], aliases: {}, settings: {}, caps: new Map(), live: null, liveOk: false,
+    const S = { combos: [], conns: [], nodes: [], aliases: {}, settings: {}, caps: new Map(), capsByName: new Map(), live: null, liveOk: false,
                 sel: null, focus: null, q: "", open: new Set(), shut: new Set(), flash: new Map(), lastSeen: null, loadedAt: null, err: null,
                 view: pref.get("view", "cards"), sort: pref.get("sort", "dashboard"), edit: false };
     const $ = (id) => root.getElementById(id);
@@ -211,12 +208,23 @@
         S.settings = s || {}; S.aliases = a.aliases || {};
         // context window per model, from 9router's own capability table (the same numbers its combos page shows);
         // indexed under both spellings a combo entry can use: provider id and alias prefix
-        S.caps = new Map();
+        // Custom nodes and many aliases are not in that list under the combo's spelling, but 9router's table is
+        // keyed by model id first, so fall back to the bare model name and take its most common value there
+        S.caps = new Map(); S.capsByName = new Map();
+        const votes = new Map();
         for (const m of md.models || []) {
           const k = m.caps;
           if (!k?.contextWindow) continue;
-          for (const key of [m.fullModel, m.routedModel]) if (key && !S.caps.has(key)) S.caps.set(key, { ctx: k.contextWindow, out: k.maxOutput || 0 });
+          const v = { ctx: k.contextWindow, out: k.maxOutput || 0 };
+          for (const key of [m.fullModel, m.routedModel]) if (key && !S.caps.has(key)) S.caps.set(key, v);
+          for (const nm of new Set([m.model, lastSeg(m.model || "")])) {
+            if (!nm) continue;
+            if (!votes.has(nm)) votes.set(nm, new Map());
+            const b = votes.get(nm), id = `${v.ctx}/${v.out}`;
+            b.set(id, { v, n: (b.get(id)?.n || 0) + 1 });
+          }
         }
+        for (const [nm, b] of votes) S.capsByName.set(nm, [...b.values()].sort((x, y) => y.n - x.n)[0].v);
         S.loadedAt = now(); S.err = null;
         if (!S.sel || !S.combos.some((x) => x.name === S.sel)) S.sel = S.combos[0]?.name || null;
       } catch (e) { S.err = String(e.message || e); }
@@ -286,7 +294,7 @@
       let flash = null;
       for (const [k, v] of S.flash) { const [m, p] = k.split("|"); if ((m === model || m === entry) && provIds.has(p)) flash = v; }
       const key = `${model}|${[...provIds].sort()}`; // traffic identity: the stream knows model + provider, not the combo
-      const caps = S.caps.get(entry) || (prov.id && S.caps.get(`${prov.id}/${model}`)) || null;
+      const caps = S.caps.get(entry) || (prov.id && S.caps.get(`${prov.id}/${model}`)) || capsByName(model);
       return { type: "leaf", entry, prefix, model, prov, conns, states, ok, warn, health, req, last, busy, flash, key, caps };
     }
 
@@ -298,6 +306,13 @@
       return c.models.flatMap((m) => { const r = resolveEntry(m); return r.type === "combo" ? leaves(r.name, s2) : [r]; });
     }
     const usable = (r) => r.health === "ok" || r.health === "warn";
+    // model id as written, its last path segment, then without a ":tag" routing suffix
+    function capsByName(model) {
+      const tries = [model, lastSeg(model)];
+      tries.push(...tries.map((t) => t.replace(/:[^:/]+$/, "")));
+      for (const t of tries) { const v = S.capsByName.get(t); if (v) return { ...v, byName: true }; }
+      return null;
+    }
 
     // ---- context window: per model, and for a chain the smallest one (any entry may end up serving, so
     // that is what a request can rely on), max output the largest, like 9router's combos page ----
@@ -313,7 +328,7 @@
     function ctxInfo(c, chain) {
       if (!c) return chain || !S.caps.size ? null : { txt: "ctx ?", title: "no context window data for this model in 9router", warn: false };
       if (!chain) return { txt: `ctx ${tok(c.ctx)}`, warn: false,
-        title: `context window ${c.ctx.toLocaleString()} tokens · max output ${c.out ? c.out.toLocaleString() : "?"}` };
+        title: `context window ${c.ctx.toLocaleString()} tokens · max output ${c.out ? c.out.toLocaleString() : "?"}${c.byName ? " · matched by model name" : ""}` };
       return { txt: `${c.wide ? "⚠ " : ""}ctx ≥${tok(c.ctx)}`, warn: c.wide,
         title: [`smallest context window in this chain ${c.ctx.toLocaleString()} tokens (largest ${c.hi.toLocaleString()})`,
           `max output up to ${c.out.toLocaleString()}`, c.miss ? `${c.miss} model${c.miss > 1 ? "s" : ""} without data` : "",
