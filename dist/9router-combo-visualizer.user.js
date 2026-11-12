@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         9router Combo Visualizer
 // @namespace    https://github.com/alfiyansys/9router-combo-visualizer
-// @version      0.5.4
+// @version      0.6.0
 // @description  Live overlay of 9router combo chains: strategy order, nested combos, provider health and traffic.
 // @author       alfiyansys
 // @license      MIT
@@ -121,7 +121,8 @@
   .tree .fade{opacity:.18} .tree .edge.foc{stroke:var(--alt);stroke-width:2.5} .tree .elab.foc{fill:var(--alt);font-weight:600}
   .tree .edb{fill:var(--panel);stroke:var(--line)} .tree .edt{fill:var(--acc);font-size:12px} .tree .ed:hover .edb{stroke:var(--acc)}
   .tree g[data-e]{cursor:pointer}
-  .tree .n-combo.foc .box{stroke:var(--alt);stroke-width:2} .tree g[data-f]{cursor:pointer}`;
+  .tree .n-combo.foc .box{stroke:var(--alt);stroke-width:2} .tree g[data-f]{cursor:pointer}
+  .tree .cx{fill:var(--mute);font-size:10.5px} .tree .cx.warn-t{fill:var(--warn);font-weight:600}`;
   const TREE = { W: 280, H: 36, COL: 330, ROW: 44, PAD: 6 };
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -131,6 +132,12 @@
     const s = (now() - new Date(t)) / 1000;
     if (isNaN(s)) return "";
     return s < 60 ? `${s | 0}s` : s < 3600 ? `${(s / 60) | 0}m` : s < 86400 ? `${(s / 3600) | 0}h` : `${(s / 86400) | 0}d`;
+  };
+  // token counts the way model cards write them: 32768 -> 32K, 128000 -> 128K, 1048576 -> 1M
+  const tok = (n) => {
+    if (!n) return "?";
+    const [u, k] = n >= 1e6 ? ["M", 1e6] : ["K", 1e3], bin = k === 1e6 ? 1048576 : 1024;
+    return `${+(n / (n % k && !(n % bin) ? bin : k)).toFixed(1)}${u}`; // decimal unless it is an exact binary size
   };
   // per-viewer preference only; storage can be unavailable, so never depend on it
   const pref = {
@@ -190,7 +197,7 @@
 
   function create() {
     let host = null, root = null, es = null, timers = [], onKey = null, pend = false, drawn = "", pan = null, dragged = false, hidden = false;
-    const S = { combos: [], conns: [], nodes: [], aliases: {}, settings: {}, live: null, liveOk: false,
+    const S = { combos: [], conns: [], nodes: [], aliases: {}, settings: {}, caps: new Map(), live: null, liveOk: false,
                 sel: null, focus: null, q: "", open: new Set(), shut: new Set(), flash: new Map(), lastSeen: null, loadedAt: null, err: null,
                 view: pref.get("view", "cards"), sort: pref.get("sort", "dashboard"), edit: false };
     const $ = (id) => root.getElementById(id);
@@ -198,10 +205,18 @@
     // ---- data ----
     async function load() {
       try {
-        const [c, p, n, s, a] = await Promise.all([getJSON("/api/combos"), getJSON("/api/providers"), getJSON("/api/provider-nodes"),
-          getJSON("/api/settings"), getJSON("/api/models/alias").catch(() => ({}))]);
+        const [c, p, n, s, a, md] = await Promise.all([getJSON("/api/combos"), getJSON("/api/providers"), getJSON("/api/provider-nodes"),
+          getJSON("/api/settings"), getJSON("/api/models/alias").catch(() => ({})), getJSON("/api/models").catch(() => ({}))]);
         S.combos = c.combos || []; S.conns = p.connections || []; S.nodes = n.nodes || [];
         S.settings = s || {}; S.aliases = a.aliases || {};
+        // context window per model, from 9router's own capability table (the same numbers its combos page shows);
+        // indexed under both spellings a combo entry can use: provider id and alias prefix
+        S.caps = new Map();
+        for (const m of md.models || []) {
+          const k = m.caps;
+          if (!k?.contextWindow) continue;
+          for (const key of [m.fullModel, m.routedModel]) if (key && !S.caps.has(key)) S.caps.set(key, { ctx: k.contextWindow, out: k.maxOutput || 0 });
+        }
         S.loadedAt = now(); S.err = null;
         if (!S.sel || !S.combos.some((x) => x.name === S.sel)) S.sel = S.combos[0]?.name || null;
       } catch (e) { S.err = String(e.message || e); }
@@ -271,7 +286,8 @@
       let flash = null;
       for (const [k, v] of S.flash) { const [m, p] = k.split("|"); if ((m === model || m === entry) && provIds.has(p)) flash = v; }
       const key = `${model}|${[...provIds].sort()}`; // traffic identity: the stream knows model + provider, not the combo
-      return { type: "leaf", entry, prefix, model, prov, conns, states, ok, warn, health, req, last, busy, flash, key };
+      const caps = S.caps.get(entry) || (prov.id && S.caps.get(`${prov.id}/${model}`)) || null;
+      return { type: "leaf", entry, prefix, model, prov, conns, states, ok, warn, health, req, last, busy, flash, key, caps };
     }
 
     function leaves(name, seen = new Set()) {
@@ -282,6 +298,29 @@
       return c.models.flatMap((m) => { const r = resolveEntry(m); return r.type === "combo" ? leaves(r.name, s2) : [r]; });
     }
     const usable = (r) => r.health === "ok" || r.health === "warn";
+
+    // ---- context window: per model, and for a chain the smallest one (any entry may end up serving, so
+    // that is what a request can rely on), max output the largest, like 9router's combos page ----
+    const WIDE = 2; // flag a chain whose context windows differ by this factor or more
+    function chainCaps(ls) {
+      const k = ls.map((l) => l.caps).filter(Boolean);
+      if (!k.length) return null;
+      const lo = Math.min(...k.map((c) => c.ctx)), hi = Math.max(...k.map((c) => c.ctx));
+      return { ctx: lo, hi, out: Math.max(...k.map((c) => c.out)), miss: ls.length - k.length, wide: hi >= lo * WIDE };
+    }
+    // { txt, title, warn } for a model (r.caps) or a chain (chainCaps); null when 9router has no data
+    // (an older 9router without /api/models has none at all, so nothing is shown rather than "?" everywhere)
+    function ctxInfo(c, chain) {
+      if (!c) return chain || !S.caps.size ? null : { txt: "ctx ?", title: "no context window data for this model in 9router", warn: false };
+      if (!chain) return { txt: `ctx ${tok(c.ctx)}`, warn: false,
+        title: `context window ${c.ctx.toLocaleString()} tokens · max output ${c.out ? c.out.toLocaleString() : "?"}` };
+      return { txt: `${c.wide ? "⚠ " : ""}ctx ≥${tok(c.ctx)}`, warn: c.wide,
+        title: [`smallest context window in this chain ${c.ctx.toLocaleString()} tokens (largest ${c.hi.toLocaleString()})`,
+          `max output up to ${c.out.toLocaleString()}`, c.miss ? `${c.miss} model${c.miss > 1 ? "s" : ""} without data` : "",
+          c.wide ? `context windows differ ${WIDE}× or more: a long prompt that fits one model can fail on a smaller fallback` : ""]
+          .filter(Boolean).join(" · ") };
+    }
+    const ctxBadge = (x) => x ? `<span class="badge ${x.warn ? "warn-t" : ""}" title="${esc(x.title)}">${esc(x.txt)}</span>` : "";
     const usedBy = (name) => S.combos.filter((c) => c.models.includes(name)).map((c) => c.name);
 
     // Which leaves would take a request right now. Fallback: first usable entry (descending into
@@ -341,7 +380,7 @@
       return `<div class="step"><span class="num">${i + 1}</span><div class="lw">
         <div class="${cls}" data-l="${esc(path)}" title="${esc(r.entry)} — click to ${openConns ? "hide" : "show"} connections">
         <span class="dot ${r.health}"></span><span class="pfx">${esc(r.prefix || "—")}</span>
-        <span class="md">${esc(r.model)}</span>${r.via ? `<span class="badge">alias ${esc(r.via)}</span>` : ""}
+        <span class="md">${esc(r.model)}</span>${r.via ? `<span class="badge">alias ${esc(r.via)}</span>` : ""}${r.prefix ? ctxBadge(ctxInfo(r.caps)) : ""}
         <span class="pv">${r.prefix ? esc(r.prov.label) : ""}</span>
         <span class="st">${connTxt}<br>${r.req ? `${r.req.toLocaleString()} req` : "no traffic"}${r.last ? ` · ${ago(r.last)} ago` : ""}${tag ? ` · <span class="acc-t">${tag}</span>` : ""}${on ? "" : ` · ${DUP}`}</span>
         </div>${conns}</div></div>`;
@@ -358,7 +397,7 @@
         const isOpen = isOpenCombo(p), sub = comboMap().get(r.name), ls = leaves(r.name);
         return `<div class="step"><span class="num">${i + 1}</span><div class="lw nest">
           <div class="gh"><span class="tw" data-k="${esc(p)}">${isOpen ? "▾" : "▸"} combo ${esc(r.name)}</span>
-          <span class="badge">${esc(sub ? strategyOf(sub) : "?")}</span><span class="badge">${ls.length} models</span>
+          <span class="badge">${esc(sub ? strategyOf(sub) : "?")}</span><span class="badge">${ls.length} models</span>${ctxBadge(ctxInfo(chainCaps(ls), true))}
           ${r.via ? `<span class="badge">alias ${esc(r.via)}</span>` : ""}
           ${sub && S.edit ? `<button class="eb" data-e="${esc(r.name)}" title="Open ${esc(r.name)} in the dashboard's edit dialog">Edit combo</button>` : ""}</div>
           ${isOpen ? comboHTML(r.name, p, s2, marks) : healthBar(ls)}</div></div>`;
@@ -372,7 +411,7 @@
     function treeNodes(name, path, seen, marks) {
       const c = comboMap().get(name);
       const ls = leaves(name);
-      const node = { kind: "combo", path, key: path, children: [], health: aggHealth(ls), name: c ? name : "",
+      const node = { kind: "combo", path, key: path, children: [], health: aggHealth(ls), name: c ? name : "", cx: ctxInfo(chainCaps(ls), true),
         t1: (path ? (isOpenCombo(path) ? "▾ " : "▸ ") : "") + "combo " + name,
         t2: c ? `${strategyOf(c)} · ${c.models.length} entries · ${ls.length} models` : "not found" };
       if (!c) return node;
@@ -386,7 +425,7 @@
         else {
           const tag = marks.get(p), bad = r.states.filter(([s]) => s === "bad").length;
           ch = { kind: "leaf", path: p, entry: r.entry, health: r.health, tag, dead: !usable(r), dup: dup(r, p, marks), children: [],
-            flash: lit(r, p, marks) && r.flash && now() - r.flash.t < 2500,
+            flash: lit(r, p, marks) && r.flash && now() - r.flash.t < 2500, cx: r.prefix ? ctxInfo(r.caps) : null,
             t1: `${r.prefix ? r.prefix + "/" : ""}${r.model}`,
             t2: [tag || "", dup(r, p, marks) ? DUP : "", r.prefix ? r.prov.label : "",
               !r.prefix ? "missing combo or alias" : r.conns.length ? `${r.ok}/${r.conns.length} ready${bad ? `, ${bad} down` : ""}` : (r.prov.known ? "no connection" : "unknown prefix"),
@@ -418,6 +457,14 @@
     const editGlyph = (name, x, y) => `<g class="ed" data-e="${esc(name)}"><title>Edit combo ${esc(name)} in the dashboard</title>
       <rect class="edb" x="${x + TREE.W - 30}" y="${y + 7}" width="22" height="20" rx="5"/>
       <text class="edt" x="${x + TREE.W - 19}" y="${y + 21}" text-anchor="middle">✎</text></g>`;
+    // context window, right-aligned on the title line (left of the pencil when there is one); returns the
+    // svg and the width it takes from the title
+    const ctxGlyph = (cx, x, y, edit) => {
+      if (!cx) return { svg: "", w: 0 };
+      const r = x + TREE.W - (edit ? 36 : 8);
+      return { svg: `<text class="cx ${cx.warn ? "warn-t" : ""}" x="${r}" y="${y + 15}" text-anchor="end"><title>${esc(cx.title)}</title>${esc(cx.txt)}</text>`,
+        w: cx.txt.length * 6 + 8 };
+    };
 
     function treeHTML(name, marks) {
       const root = treeNodes(name, "", new Set(), marks), { w, h } = layout(root);
@@ -434,11 +481,11 @@
         }
         const cls = [`n-${n.kind}`, n.tag ? "serve" : "", n.dead ? "dead" : "", n.dup ? "dup" : "", n.flash ? "flash" : ""].join(" ");
         const attr = n.kind === "combo" && n.path ? `data-k="${esc(n.path)}"` : n.kind === "leaf" ? `data-l="${esc(n.path)}"` : "";
-        const sub = n.t2;
-        boxes.push(`<g class="${cls}" ${attr}><title>${esc(n.entry || n.t1)}\n${esc(sub)}</title>
+        const sub = n.t2, ed = !!(n.name && S.edit), cg = ctxGlyph(n.cx, x, y, ed);
+        boxes.push(`<g class="${cls}" ${attr}><title>${esc(n.entry || n.t1)}\n${esc(sub)}${n.cx ? "\n" + esc(n.cx.title) : ""}</title>
           <rect class="box" x="${x}" y="${y}" width="${W}" height="${H}" rx="7"/>
           <rect class="stripe ${n.health}" x="${x}" y="${y}" width="4" height="${H}" rx="2"/>
-          <text class="t1 ${n.kind === "leaf" ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(n.t1, W - (n.name && S.edit ? 44 : 20), n.kind === "leaf" ? 7.2 : 6.6))}</text>${n.name && S.edit ? editGlyph(n.name, x, y) : ""}
+          <text class="t1 ${n.kind === "leaf" ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(n.t1, W - (ed ? 44 : 20) - cg.w, n.kind === "leaf" ? 7.2 : 6.6))}</text>${cg.svg}${ed ? editGlyph(n.name, x, y) : ""}
           <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(sub, W - 20, 5.8))}</text></g>`);
       })(root);
       return `<div class="tree"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Chain tree of ${esc(name)}">
@@ -455,7 +502,7 @@
       // pass 1: walk like the tree; every leaf occurrence gets a provisional row, used as a barycenter
       (function walk(cname, path, depth, seen) {
         const c = comboMap().get(cname), ls = leaves(cname), first = row;
-        const node = { kind: "combo", path, depth, kids: [], health: aggHealth(ls), name: c ? cname : "",
+        const node = { kind: "combo", path, depth, kids: [], health: aggHealth(ls), name: c ? cname : "", cx: ctxInfo(chainCaps(ls), true),
           t1: "combo " + cname,
           t2: c ? `${strategyOf(c)} · ${c.models.length} entries · ${ls.length} models` : "not found" };
         combos.push(node); maxDepth = Math.max(maxDepth, depth);
@@ -549,18 +596,18 @@
       }
       for (const e of edges) if (e.label) svg.push(`<text class="elab ${e.hot ? "hot" : e.foc ? "foc" : ""} ${e.fade ? "fade" : ""}" x="${e.to.x + PAD - 4}" y="${e.ye - 3}" text-anchor="end">${e.label}</text>`);
       const box = (n, cls, attr, t1, t2, title, mono) => {
-        const x = n.x + PAD, y = n.y + PAD;
-        return `<g class="${cls}" ${attr}><title>${esc(title)}\n${esc(t2)}</title>
+        const x = n.x + PAD, y = n.y + PAD, ed = !!(n.name && S.edit), cg = ctxGlyph(n.cx, x, y, ed);
+        return `<g class="${cls}" ${attr}><title>${esc(title)}\n${esc(t2)}${n.cx ? "\n" + esc(n.cx.title) : ""}</title>
           <rect class="box" x="${x}" y="${y}" width="${W}" height="${H}" rx="7"/>
           <rect class="stripe ${n.health}" x="${x}" y="${y}" width="4" height="${H}" rx="2"/>
-          <text class="t1 ${mono ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(t1, W - (n.name && S.edit ? 44 : 20), mono ? 7.2 : 6.6))}</text>
-          <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(t2, W - 20, 5.8))}</text>${n.name && S.edit ? editGlyph(n.name, x, y) : ""}</g>`;
+          <text class="t1 ${mono ? "mono" : ""}" x="${x + 12}" y="${y + 15}">${esc(fit(t1, W - (ed ? 44 : 20) - cg.w, mono ? 7.2 : 6.6))}</text>${cg.svg}
+          <text class="t2" x="${x + 12}" y="${y + 29}">${esc(fit(t2, W - 20, 5.8))}</text>${ed ? editGlyph(n.name, x, y) : ""}</g>`;
       };
       combos.forEach((c) => svg.push(box(c, `n-combo ${c.fade ? "fade" : ""} ${c.foc ? "foc" : ""}`, c.path ? `data-f="${esc(c.path)}"` : "",
         c.t1, c.t2, `${c.t1} — click to ${c.foc ? "clear the highlight" : "highlight its routes"}`)));
       ms.forEach((m) => {
         const r = m.r, bad = r.states.filter(([s]) => s === "bad").length, refs = m.rows.length;
-        m.health = r.health;
+        m.health = r.health; m.cx = r.prefix ? ctxInfo(r.caps) : null;
         const t2 = [[...m.tags].join(", "),
           !r.prefix ? "missing combo or alias" : r.conns.length ? `${r.ok}/${r.conns.length} ready${bad ? `, ${bad} down` : ""}` : (r.prov.known ? "no connection" : "unknown prefix"),
           refs > 1 ? `${refs} routes` : "", r.req ? `${r.req.toLocaleString()} req` : ""].filter(Boolean).join(" · ");
@@ -610,19 +657,21 @@
       const ls = leaves(c.name), by = usedBy(c.name), marks = new Map();
       marks.served = new Set();
       plan(c.name, "", new Set(), marks, "serves now");
-      const cnt = (h) => ls.filter((l) => l.health === h).length;
+      const cnt = (h) => ls.filter((l) => l.health === h).length, cc = chainCaps(ls), cx = ctxInfo(cc, true);
       const feed = (L?.recentRequests || []).slice(0, 8).map((r) =>
         `<div>${esc(new Date(r.timestamp).toLocaleTimeString())} · ${esc(r.provider)} · ${esc(r.model)} · ${esc(r.status)} · ${esc(r.promptTokens)}/${esc(r.completionTokens)} tok</div>`).join("");
       m.innerHTML = `<h2>${esc(c.name)}${S.edit ? ` <button class="eb" data-e="${esc(c.name)}" title="Open ${esc(c.name)} in the dashboard's edit dialog">Edit combo</button>` : ""}</h2><div class="sub">
         <span class="pill">${esc(strategyOf(c))}</span><span class="pill">${ls.length} resolved models</span>
         ${["ok", "warn", "bad", "none"].map((h) => `<span class="pill"><span class="dot ${h}"></span>${cnt(h)}</span>`).join("")}
+        ${cx ? `<span class="pill ${cx.warn ? "warn-t" : ""}" title="${esc(cx.title)}">${esc(cc.wide ? `⚠ ctx ${tok(cc.ctx)}–${tok(cc.hi)}` : cx.txt)} · out ≤${esc(tok(cc.out))}</span>` : ""}
         ${by.length ? `<span>used by ${by.map((b) => `<a href="#" data-c="${esc(b)}" style="color:var(--acc)">${esc(b)}</a>`).join(", ")}</span>` : ""}
         <span>· call as <code>${esc(c.name)}</code></span><span class="sp"></span>
         <span class="seg">${["cards", "tree", "flow"].map((v) => `<button data-v="${v}" class="${S.view === v ? "on" : ""}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}</span></div>
         ${S.view === "tree" ? treeHTML(c.name, marks) : S.view === "flow" ? flowHTML(c.name, marks) : comboHTML(c.name, "", new Set(), marks)}
         <div class="legend"><span><span class="dot ok"></span>all connections ready</span><span><span class="dot warn"></span>some limited / backoff / model lock</span>
         <span><span class="dot bad"></span>connections down</span><span><span class="dot none"></span>no connection or unknown prefix</span>
-        <span>outline = would take a request now</span><span>flash = request just landed · click a model for its connections${S.view === "flow" ? " · click a combo to highlight its routes" : ""}${S.view === "cards" ? "" : " · drag to pan"}</span></div>
+        <span>outline = would take a request now</span>
+        ${S.caps.size ? `<span>ctx = context window from 9router's capability table (unknown models get its 200K default) · ≥ = smallest in the chain · ⚠ = differs ${WIDE}× or more</span>` : ""}<span>flash = request just landed · click a model for its connections${S.view === "flow" ? " · click a combo to highlight its routes" : ""}${S.view === "cards" ? "" : " · drag to pan"}</span></div>
         <div class="feed"><b>Recent requests</b>${feed || "<div>—</div>"}</div>`;
       m.scrollTop = top;
       const tree = m.querySelector(".tree");
