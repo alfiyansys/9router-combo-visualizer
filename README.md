@@ -23,6 +23,10 @@ overlay shows how a request actually travels through them.
   built-in alias, or provider id) and coloured by its connections:
   🟢 all ready · 🟡 some rate-limited, backing off or model-locked · 🔴 down or disabled ·
   ⚪ no connection / unknown prefix.
+- **Context window down the chain:** each model shows its context window (`ctx 200K`) and each
+  combo the smallest one it can reach (`ctx ≥128K`), since any entry may end up serving a
+  request; the header adds the largest max output. A combo whose models differ 2× or more is
+  flagged ⚠, because a long prompt that fits the first model can fail on a smaller fallback.
 - **What would serve now:** the entry that a request would land on given current health
   (outlined), or every candidate for non-fallback strategies.
 - **Connection details:** click a model to see its connections in priority order with the
@@ -95,6 +99,9 @@ Built and tested against **9router v0.5.109**. The overlay relies on the dashboa
   say which combo a request came through.
 - "Serves now" is a prediction from connection health. Sticky round-robin state and smart/fusion
   scoring are not exposed by the API.
+- Context windows come from 9router's own capability table (`/api/models`, the numbers its combos
+  page shows), not from the providers. Models it does not know get its 200K default, which looks
+  the same as a real 200K model. On a 9router without that endpoint the context window is hidden.
 - Built-in provider aliases (e.g. `oc` → `opencode`) come from a snapshot of 9router's catalog,
   so aliases added in newer versions show as *unknown prefix* until the snapshot is refreshed.
 

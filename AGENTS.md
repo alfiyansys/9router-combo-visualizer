@@ -84,7 +84,7 @@ There is no test suite; verify in a real dashboard:
 
 Check at least, in the Cards, Tree and Flow views: a nested combo, a round-robin combo, an empty
 combo, a combo with an unknown prefix or a reference to a missing combo, connection details on
-click, Read-only mode hiding every edit control and resetting on reopen, **Edit combo** (from another page and from the combos page itself; the overlay must return to the same combo, view and mode, with reloaded data, and Esc in the dialog must not close it), collapsing a nested combo (Tree/Cards) or highlighting its routes (Flow), dragging to pan a Tree/Flow wider and taller than the window
+click, context window badges (a chain with mixed sizes gets ⚠, a model without data shows `ctx ?`), Read-only mode hiding every edit control and resetting on reopen, **Edit combo** (from another page and from the combos page itself; the overlay must return to the same combo, view and mode, with reloaded data, and Esc in the dialog must not close it), collapsing a nested combo (Tree/Cards) or highlighting its routes (Flow), dragging to pan a Tree/Flow wider and taller than the window
 (a drag must not toggle the node it started on), light and dark mode, and the stream reconnect state.
 
 ## 9router API contract
@@ -98,6 +98,7 @@ Endpoints used (all `GET`, cookie auth), verified against 9router v0.5.109:
 | `/api/providers` | `connections[]`: `provider`, `name`, `priority`, `isActive`, `testStatus`, `errorCode`, `backoffLevel`, `rateLimitedUntil`, `modelLock_<model>`, `lastError`, `lastUsedAt`, `providerSpecificData.prefix` |
 | `/api/provider-nodes` | `nodes[]`: `id`, `name`, `prefix` |
 | `/api/models/alias` | `aliases` (bare name → `provider/model`) |
+| `/api/models` | `models[]`: `fullModel` (`provider/model`), `routedModel` (`alias/model`), `caps.contextWindow`, `caps.maxOutput`; optional, the context window is hidden without it |
 | `/api/usage/stream` | SSE: `byModel{rawModel,provider,requests,lastUsed}`, `pending.byModel`, `activeRequests`, `recentRequests`, `totalRequests` |
 
 Known strategies: `fallback`, `round-robin`, `random`, `smart`, `fusion` (see `STRATEGY` in
@@ -120,5 +121,7 @@ the version note above the constant, and mention the 9router version in the comm
 
 - Traffic is attributed per model and provider, not per combo: the usage stream does not say
   which combo a request came through.
+- Context windows are 9router's capability-table values (unknown models get its 200K default,
+  indistinguishable over the API from a real 200K model), so they are hints, not provider limits.
 - "serves now" is a prediction from connection health, not a trace of the router's decision.
   Sticky round-robin state and smart/fusion scoring are not visible over the API.
