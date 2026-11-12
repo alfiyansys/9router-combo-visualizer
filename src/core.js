@@ -114,12 +114,8 @@
     if (isNaN(s)) return "";
     return s < 60 ? `${s | 0}s` : s < 3600 ? `${(s / 60) | 0}m` : s < 86400 ? `${(s / 3600) | 0}h` : `${(s / 86400) | 0}d`;
   };
-  // token counts the way model cards write them: 32768 -> 32K, 128000 -> 128K, 1048576 -> 1M
-  const tok = (n) => {
-    if (!n) return "?";
-    const [u, k] = n >= 1e6 ? ["M", 1e6] : ["K", 1e3], bin = k === 1e6 ? 1048576 : 1024;
-    return `${+(n / (n % k && !(n % bin) ? bin : k)).toFixed(1)}${u}`; // decimal unless it is an exact binary size
-  };
+  // decimal, like 9router's own combos page, so the numbers read the same in both (262144 -> 262K)
+  const tok = (n) => !n ? "?" : n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1e3)}K`;
   // per-viewer preference only; storage can be unavailable, so never depend on it
   const pref = {
     get: (k, d) => { try { return localStorage.getItem("nr-combo-viz:" + k) ?? d; } catch { return d; } },
